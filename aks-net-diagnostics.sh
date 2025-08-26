@@ -18,8 +18,10 @@ OPTIONS:
   --subscription <SUB_ID> Azure subscription ID (overrides current context)
   --probe-api             Enable active connectivity checks from VMSS instances
                          WARNING: Executes commands inside cluster nodes
-  --json-out <FILE>       Output JSON report to file
-  --cache                 Cache Azure CLI responses for faster re-runs
+  --json-out <FILE>       Output JSON report to file (default: auto-generated filename)
+  --no-json              Skip JSON report generation
+  --verbose              Show detailed console output (default: summary only)
+  --cache                Cache Azure CLI responses for faster re-runs
   -h, --help             Show this help message
 
 DESCRIPTION:
@@ -34,7 +36,8 @@ DESCRIPTION:
 EXAMPLES:
   $0 -n my-aks-cluster -g my-resource-group
   $0 -n my-cluster -g my-rg --subscription 12345678-1234-1234-1234-123456789012
-  $0 -n my-cluster -g my-rg --probe-api --json-out report.json
+  $0 -n my-cluster -g my-rg --probe-api --json-out custom-report.json
+  $0 -n my-cluster -g my-rg --verbose --no-json
 
 EOF
 }
@@ -45,6 +48,8 @@ AKS_RG=""
 SUB_ID=""
 PROBE_API=0
 JSON_OUT=""
+NO_JSON=0
+VERBOSE=0
 CACHE=0
 
 # Parse command line arguments
@@ -69,6 +74,14 @@ while [[ $# -gt 0 ]]; do
     --json-out) 
       JSON_OUT="$2"
       shift 2
+      ;;
+    --no-json) 
+      NO_JSON=1
+      shift
+      ;;
+    --verbose) 
+      VERBOSE=1
+      shift
       ;;
     --cache) 
       CACHE=1
@@ -124,6 +137,17 @@ fi
 # Get current subscription for reporting
 CURRENT_SUB="$(az account show --query id -o tsv)"
 echo "Using Azure subscription: ${CURRENT_SUB}"
+
+# Set up JSON output filename if not disabled
+if [[ "${NO_JSON}" -eq 0 ]]; then
+  if [[ -z "${JSON_OUT}" ]]; then
+    # Auto-generate filename with timestamp
+    TIMESTAMP="$(date +"%Y%m%d_%H%M%S")"
+    JSON_OUT="aks-network-report_${AKS_NAME}_${TIMESTAMP}.json"
+  fi
+  echo "JSON report will be saved to: ${JSON_OUT}"
+fi
+
 echo
 
 # Cache directory for Azure CLI responses
@@ -1249,21 +1273,24 @@ FINAL_REPORT="$(jq -n \
     }
   }')"
 
-# Step 10: Generate Markdown output
+# Step 10: Generate output
 echo
 echo "=========================================================================="
-echo "# AKS Network Assessment Report"
-echo
-echo "**Cluster:** ${AKS_NAME}"
-echo "**Resource Group:** ${AKS_RG}"
-echo "**Subscription:** ${CURRENT_SUB}"
-echo "**Generated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
-echo
 
-echo "## Cluster Overview"
-echo
-echo "| Property | Value |"
-echo "|----------|-------|"
+if [[ "${VERBOSE}" -eq 1 ]]; then
+  # Detailed Markdown output
+  echo "# AKS Network Assessment Report"
+  echo
+  echo "**Cluster:** ${AKS_NAME}"
+  echo "**Resource Group:** ${AKS_RG}"
+  echo "**Subscription:** ${CURRENT_SUB}"
+  echo "**Generated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+  echo
+
+  echo "## Cluster Overview"
+  echo
+  echo "| Property | Value |"
+  echo "|----------|-------|"
 echo "| Provisioning State | ${PROVISIONING_STATE} |"
 echo "| Location | ${LOCATION} |"
 echo "| Network Plugin | ${NETWORK_PLUGIN} |"
@@ -1353,14 +1380,7 @@ for vnet_info in $(echo "${VNETS_ANALYSIS}" | jq -r '.[] | @base64'); do
     
     # Show DNS analysis with location details
     echo "- **DNS Server Analysis:**"
-    echo "${vnet_decoded}" | jq -r '.dnsAnalysis[] | 
-      if .locationType == "local" then
-        "  - \(.ip): Local (in same VNet)"
-      elif .locationType == "peered" then
-        "  - \(.ip): Peered VNet (\(.hostingVnet))"
-      else
-        "  - \(.ip): External"
-      end'
+    echo "${vnet_decoded}" | jq -r '.dnsAnalysis[] | if .locationType == "local" then "  - \(.ip): Local (in same VNet)" elif .locationType == "peered" then "  - \(.ip): Peered VNet (\(.hostingVnet))" else "  - \(.ip): External" end'
   else
     echo "- **DNS:** Azure default"
   fi
@@ -1464,17 +1484,85 @@ echo "- [Effective Security Rules](https://learn.microsoft.com/azure/virtual-net
 echo "- [AKS Network Concepts](https://learn.microsoft.com/azure/aks/concepts-network)"
 echo
 
-# Output JSON report
-if [[ -n "${JSON_OUT}" ]]; then
-  echo "${FINAL_REPORT}" > "${JSON_OUT}"
-  echo "📄 JSON report saved to: ${JSON_OUT}"
 else
-  echo "## JSON Report"
+  # Summary output for non-verbose mode
+  echo "# AKS Network Assessment Summary"
   echo
-  echo '```json'
-  echo "${FINAL_REPORT}" | jq '.'
-  echo '```'
+  echo "**Cluster:** ${AKS_NAME} (${PROVISIONING_STATE})"
+  echo "**Resource Group:** ${AKS_RG}"
+  echo "**Generated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+  echo
+  
+  # Show key configuration
+  echo "**Configuration:**"
+  echo "- Network Plugin: ${NETWORK_PLUGIN}"
+  echo "- Outbound Type: ${OUTBOUND_TYPE}"
+  echo "- Private Cluster: ${PRIVATE_CLUSTER_ENABLED}"
+  if [[ "${PRIVATE_CLUSTER_ENABLED}" == "true" ]]; then
+    echo "- Private DNS Zone: ${PRIVATE_DNS_ZONE}"
+  fi
+  echo
+  
+  # Show outbound IPs if available
+  if [[ "$(echo "${OUTBOUND_IPS}" | jq 'length')" -gt 0 ]]; then
+    echo "**Outbound IPs:**"
+    echo "${OUTBOUND_IPS}" | jq -r '.[] | "- " + .'
+    echo
+  fi
+  
+  # Show failure analysis summary if cluster is failed
+  if [[ "${PROVISIONING_STATE}" == "Failed" ]] && [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.enabled')" == "true" ]]; then
+    echo "**⚠️ Cluster Failure Summary:**"
+    if [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.networkRelatedFailures | length')" -gt 0 ]]; then
+      echo "- Network-related failures detected"
+      echo "- Primary error: $(echo "${FAILURE_ANALYSIS}" | jq -r '.networkRelatedFailures[0].error' | jq -r '.error.details[0].code // .error.code // "Unknown"' 2>/dev/null || echo "Unknown")"
+    fi
+    if [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.nodePoolStatus | length')" -gt 0 ]]; then
+      failed_pools="$(echo "${FAILURE_ANALYSIS}" | jq -r '.nodePoolStatus[] | select(.provisioningState == "Failed") | .name' | tr '\n' ' ')"
+      if [[ -n "${failed_pools}" ]]; then
+        echo "- Failed node pools: ${failed_pools}"
+      fi
+    fi
+    echo
+  fi
+  
+  # Show findings summary
+  critical_count=$(echo "${FINDINGS}" | jq '[.[] | select(.severity == "critical" or .severity == "error")] | length')
+  warning_count=$(echo "${FINDINGS}" | jq '[.[] | select(.severity == "warning")] | length')
+  info_count=$(echo "${FINDINGS}" | jq '[.[] | select(.severity == "info")] | length')
+  
+  echo "**Findings Summary:**"
+  if [[ "${critical_count}" -gt 0 ]]; then
+    echo "- 🔴 ${critical_count} Critical/Error issue(s)"
+  fi
+  if [[ "${warning_count}" -gt 0 ]]; then
+    echo "- 🟡 ${warning_count} Warning(s)"
+  fi
+  if [[ "${info_count}" -gt 0 ]]; then
+    echo "- ℹ️ ${info_count} Informational finding(s)"
+  fi
+  
+  if [[ "${critical_count}" -eq 0 && "${warning_count}" -eq 0 ]]; then
+    echo "- ✅ No critical issues detected"
+  fi
+  echo
+  
+  # Show top critical findings
+  if [[ "${critical_count}" -gt 0 ]]; then
+    echo "**Critical Issues:**"
+    echo "${FINDINGS}" | jq -r '.[] | select(.severity == "critical" or .severity == "error") | "- " + .code + ": " + .message' | head -3
+    echo
+  fi
+  
+  echo "💡 **Tip:** Use --verbose flag for detailed analysis or check the JSON report for complete findings."
+  echo
 fi
 
-echo
+# Output JSON report
+if [[ "${NO_JSON}" -eq 0 ]]; then
+  echo "${FINAL_REPORT}" > "${JSON_OUT}"
+  echo "📄 JSON report saved to: ${JSON_OUT}"
+  echo
+fi
+
 echo "✅ AKS network assessment completed successfully!"
