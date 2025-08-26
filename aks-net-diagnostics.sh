@@ -390,23 +390,43 @@ case "${OUTBOUND_TYPE}" in
   loadBalancer)
     echo "  - Analyzing Load Balancer outbound configuration..."
     # Get load balancers in the node resource group
-    LBS_JSON="$(azc network lb list -g "${NODE_RG}")"
+    LBS_JSON="$(az network lb list -g "${NODE_RG}" -o json 2>/dev/null || echo "[]")"
     
-    # Extract public IPs from outbound rules
-    OUTBOUND_IP_IDS="$(echo "${LBS_JSON}" | jq -r '
-      [.[] | .outboundRules[]? | .frontendIpConfigurations[]?.publicIpAddress.id] | 
-      map(select(.!=null)) | unique | .[]')"
+    # Extract public IPs from frontend IP configurations
+    # First, get all frontend IP configuration IDs from outbound rules
+    FRONTEND_CONFIG_IDS="$(echo "${LBS_JSON}" | jq -r '
+      [.[] | .outboundRules[]? | .frontendIPConfigurations[]?.id] | 
+      map(select(.!=null)) | unique | .[]' 2>/dev/null || echo "")"
     
-    if [[ -n "${OUTBOUND_IP_IDS}" ]]; then
-      while IFS= read -r ip_id; do
-        if [[ -n "${ip_id}" ]]; then
-          ip_details="$(azc network public-ip show --ids "${ip_id}")"
-          ip_address="$(echo "${ip_details}" | jq -r '.ipAddress // empty')"
-          if [[ -n "${ip_address}" ]]; then
-            OUTBOUND_IPS="$(echo "${OUTBOUND_IPS}" | jq ". + [\"${ip_address}\"]")"
+    # If no outbound rules, get all frontend IPs from the load balancer
+    if [[ -z "${FRONTEND_CONFIG_IDS}" ]]; then
+      FRONTEND_CONFIG_IDS="$(echo "${LBS_JSON}" | jq -r '
+        [.[] | .frontendIPConfigurations[]? | .id] |
+        map(select(.!=null)) | unique | .[]' 2>/dev/null || echo "")"
+    fi
+    
+    # For each frontend IP configuration, get the public IP
+    if [[ -n "${FRONTEND_CONFIG_IDS}" ]]; then
+      while IFS= read -r config_id; do
+        if [[ -n "${config_id}" ]]; then
+          # Extract load balancer name and frontend config name from ID
+          lb_name="$(echo "${config_id}" | cut -d'/' -f9)"
+          config_name="$(echo "${config_id}" | cut -d'/' -f11)"
+          
+          # Get the frontend IP configuration details
+          frontend_config="$(az network lb frontend-ip show -g "${NODE_RG}" --lb-name "${lb_name}" -n "${config_name}" -o json 2>/dev/null || echo "{}")"
+          ip_id="$(echo "${frontend_config}" | jq -r '.publicIPAddress.id // empty' 2>/dev/null || echo "")"
+          
+          if [[ -n "${ip_id}" ]]; then
+            ip_details="$(az network public-ip show --ids "${ip_id}" -o json 2>/dev/null || echo "{}")"
+            ip_address="$(echo "${ip_details}" | jq -r '.ipAddress // empty' 2>/dev/null || echo "")"
+            if [[ -n "${ip_address}" ]]; then
+              OUTBOUND_IPS="$(echo "${OUTBOUND_IPS}" | jq ". + [\"${ip_address}\"]")"
+              echo "    Found outbound IP: ${ip_address}"
+            fi
           fi
         fi
-      done <<< "${OUTBOUND_IP_IDS}"
+      done <<< "${FRONTEND_CONFIG_IDS}"
     fi
     
     OUTBOUND_ANALYSIS="$(echo "${LBS_JSON}" | jq '{
@@ -414,12 +434,16 @@ case "${OUTBOUND_TYPE}" in
       loadBalancers: [.[] | {
         name: .name,
         sku: .sku.name,
+        frontendIPConfigurations: [.frontendIPConfigurations[]? | {
+          name: .name,
+          publicIPAddress: .publicIPAddress.id
+        }],
         outboundRules: [.outboundRules[]? | {
           name: .name,
-          frontendIpConfigurations: [.frontendIpConfigurations[]? | .publicIpAddress.id]
+          frontendIpConfigurations: [.frontendIpConfigurations[]? | .id]
         }]
       }]
-    }')"
+    }' 2>/dev/null || echo '{"type": "loadBalancer", "loadBalancers": []}')"
     ;;
     
   managedNATGateway|userAssignedNATGateway)
@@ -502,41 +526,48 @@ esac
 
 # Step 5: Analyze VMSS network configuration
 echo "Analyzing VMSS network configuration..."
-VMSS_LIST="$(azc vmss list -g "${NODE_RG}")"
+VMSS_LIST="$(az vmss list -g "${NODE_RG}" -o json 2>/dev/null || echo "[]")"
 VMSS_ANALYSIS="[]"
 
-echo "${VMSS_LIST}" | jq -r '.[].name' | while IFS= read -r vmss_name; do
+# Process each VMSS
+for vmss_name in $(echo "${VMSS_LIST}" | jq -r '.[].name' 2>/dev/null); do
   if [[ -n "${vmss_name}" ]]; then
-    vmss_json="$(azc vmss show -g "${NODE_RG}" -n "${vmss_name}")"
+    echo "  - Analyzing VMSS: ${vmss_name}"
+    vmss_json="$(az vmss show -g "${NODE_RG}" -n "${vmss_name}" -o json 2>/dev/null || echo "{}")"
     
     # Get NIC configuration
-    nic_config="$(echo "${vmss_json}" | jq '.virtualMachineProfile.networkProfile.networkInterfaceConfigurations[0]')"
-    subnet_id="$(echo "${nic_config}" | jq -r '.ipConfigurations[0].subnet.id')"
+    nic_config="$(echo "${vmss_json}" | jq '.virtualMachineProfile.networkProfile.networkInterfaceConfigurations[0]' 2>/dev/null || echo "{}")"
+    subnet_id="$(echo "${nic_config}" | jq -r '.ipConfigurations[0].subnet.id // empty' 2>/dev/null || echo "")"
     
-    # Analyze subnet's NSG and route table
-    subnet_json="$(azc network vnet subnet show --ids "${subnet_id}")"
-    nsg_id="$(echo "${subnet_json}" | jq -r '.networkSecurityGroup.id // empty')"
-    rt_id="$(echo "${subnet_json}" | jq -r '.routeTable.id // empty')"
-    
-    nsg_analysis="null"
-    if [[ -n "${nsg_id}" ]]; then
-      nsg_analysis="$(analyze_nsg "${nsg_id}")"
+    if [[ -n "${subnet_id}" && "${subnet_id}" != "null" ]]; then
+      # Analyze subnet's NSG and route table
+      subnet_json="$(az network vnet subnet show --ids "${subnet_id}" -o json 2>/dev/null || echo "{}")"
+      nsg_id="$(echo "${subnet_json}" | jq -r '.networkSecurityGroup.id // empty' 2>/dev/null || echo "")"
+      rt_id="$(echo "${subnet_json}" | jq -r '.routeTable.id // empty' 2>/dev/null || echo "")"
+      
+      nsg_analysis="null"
+      if [[ -n "${nsg_id}" ]]; then
+        nsg_analysis="$(analyze_nsg "${nsg_id}")"
+      fi
+      
+      rt_analysis="null"
+      if [[ -n "${rt_id}" ]]; then
+        rt_analysis="$(analyze_route_table "${rt_id}")"
+      fi
+      
+      vmss_info="$(jq -n --arg name "${vmss_name}" --arg subnet "${subnet_id}" \
+        --argjson nsg "${nsg_analysis}" --argjson rt "${rt_analysis}" '{
+        name: $name,
+        subnetId: $subnet,
+        networkSecurityGroup: $nsg,
+        routeTable: $rt
+      }' 2>/dev/null || echo "{}")"
+      
+      VMSS_ANALYSIS="$(echo "${VMSS_ANALYSIS}" | jq --argjson vmss "${vmss_info}" '. + [$vmss]' 2>/dev/null || echo "[]")"
+      echo "    Found subnet: $(basename "${subnet_id}")"
+    else
+      echo "    Warning: Could not determine subnet for VMSS ${vmss_name}"
     fi
-    
-    rt_analysis="null"
-    if [[ -n "${rt_id}" ]]; then
-      rt_analysis="$(analyze_route_table "${rt_id}")"
-    fi
-    
-    vmss_info="$(jq -n --arg name "${vmss_name}" --arg subnet "${subnet_id}" \
-      --argjson nsg "${nsg_analysis}" --argjson rt "${rt_analysis}" '{
-      name: $name,
-      subnetId: $subnet,
-      networkSecurityGroup: $nsg,
-      routeTable: $rt
-    }')"
-    
-    VMSS_ANALYSIS="$(echo "${VMSS_ANALYSIS}" | jq --argjson vmss "${vmss_info}" '. + [$vmss]')"
   fi
 done
 
