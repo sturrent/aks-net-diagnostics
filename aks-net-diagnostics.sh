@@ -336,6 +336,83 @@ SERVICE_CIDR="$(echo "${CLUSTER_JSON}" | jq -r '.networkProfile.serviceCidr // "
 DNS_SERVICE_IP="$(echo "${CLUSTER_JSON}" | jq -r '.networkProfile.dnsServiceIp // "10.0.0.10"')"
 POD_CIDR="$(echo "${CLUSTER_JSON}" | jq -r '.networkProfile.podCidr // "10.244.0.0/16"')"
 
+# Analyze cluster failure details if in failed state
+FAILURE_ANALYSIS="null"
+if [[ "${PROVISIONING_STATE}" == "Failed" ]]; then
+  echo "Cluster is in Failed state - analyzing failure details..."
+  
+  # Get cluster resource ID for activity log queries
+  CLUSTER_RESOURCE_ID="$(echo "${CLUSTER_JSON}" | jq -r '.id')"
+  
+  # Get recent activity logs for the cluster (last 24 hours)
+  echo "  - Fetching activity logs for failure analysis..."
+  ACTIVITY_LOGS="$(az monitor activity-log list \
+    --resource-id "${CLUSTER_RESOURCE_ID}" \
+    --start-time "$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')" \
+    --end-time "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    --status Failed \
+    -o json 2>/dev/null || echo "[]")"
+  
+  # Get the most recent failed operations
+  RECENT_FAILURES="$(echo "${ACTIVITY_LOGS}" | jq '[.[] | select(.status.value == "Failed") | {
+    timestamp: .eventTimestamp,
+    operationName: .operationName.value,
+    status: .status.value,
+    subStatus: .subStatus.value,
+    statusMessage: .status.localizedValue,
+    correlationId: .correlationId,
+    resourceId: .resourceId,
+    properties: .properties
+  }] | sort_by(.timestamp) | reverse | .[0:5]')"
+  
+  # Get power state information
+  POWER_STATE="$(echo "${CLUSTER_JSON}" | jq -r '.powerState.code // "unknown"')"
+  
+  # Get any error details from the cluster status
+  STATUS_DETAILS="$(echo "${CLUSTER_JSON}" | jq '.status // null')"
+  
+  # Check for common failure patterns in activity logs
+  NETWORK_RELATED_FAILURES="$(echo "${ACTIVITY_LOGS}" | jq '[.[] | select(
+    (.operationName.value | test("Microsoft.ContainerService/managedClusters"; "i")) and
+    (.status.value == "Failed") and
+    (
+      (.properties.statusMessage // .subStatus.value // "" | test("network|dns|subnet|vnet|routing|connectivity"; "i")) or
+      (.operationName.value | test("network|subnet|vnet"; "i"))
+    )
+  ) | {
+    timestamp: .eventTimestamp,
+    operation: .operationName.value,
+    error: (.properties.statusMessage // .subStatus.value // "No details available"),
+    correlationId: .correlationId
+  }] | sort_by(.timestamp) | reverse | .[0:3]')"
+  
+  # Get node pool status for additional context
+  NODE_POOL_STATUS="$(az aks nodepool list -g "${AKS_RG}" --cluster-name "${AKS_NAME}" \
+    --query '[].{name: name, provisioningState: provisioningState, powerState: powerState.code}' \
+    -o json 2>/dev/null || echo "[]")"
+  
+  # Compile failure analysis
+  FAILURE_ANALYSIS="$(jq -n \
+    --arg provisioningState "${PROVISIONING_STATE}" \
+    --arg powerState "${POWER_STATE}" \
+    --argjson statusDetails "${STATUS_DETAILS}" \
+    --argjson recentFailures "${RECENT_FAILURES}" \
+    --argjson networkFailures "${NETWORK_RELATED_FAILURES}" \
+    --argjson nodePoolStatus "${NODE_POOL_STATUS}" \
+    '{
+      provisioningState: $provisioningState,
+      powerState: $powerState,
+      statusDetails: $statusDetails,
+      recentFailures: $recentFailures,
+      networkRelatedFailures: $networkFailures,
+      nodePoolStatus: $nodePoolStatus,
+      analysisTimestamp: now | strftime("%Y-%m-%dT%H:%M:%SZ")
+    }')"
+  
+  echo "  - Found $(echo "${RECENT_FAILURES}" | jq 'length') recent failed operations"
+  echo "  - Found $(echo "${NETWORK_RELATED_FAILURES}" | jq 'length') network-related failures"
+fi
+
 # Private cluster settings
 PRIVATE_CLUSTER_ENABLED="$(echo "${CLUSTER_JSON}" | jq -r '.apiServerAccessProfile.enablePrivateCluster // false')"
 PRIVATE_DNS_ZONE="$(echo "${CLUSTER_JSON}" | jq -r '.apiServerAccessProfile.privateDNSZone // "System"')"
@@ -805,6 +882,52 @@ fi
 echo "Analyzing potential misconfigurations..."
 FINDINGS="[]"
 
+# Analyze cluster failure state and correlate with network issues
+if [[ "${PROVISIONING_STATE}" == "Failed" && "${FAILURE_ANALYSIS}" != "null" ]]; then
+  echo "  - Analyzing cluster failure patterns..."
+  
+  # Check for network-related failures
+  network_failure_count="$(echo "${FAILURE_ANALYSIS}" | jq '.networkRelatedFailures | length')"
+  if [[ "${network_failure_count}" -gt 0 ]]; then
+    # Get the most recent network failure details
+    recent_network_error="$(echo "${FAILURE_ANALYSIS}" | jq -r '.networkRelatedFailures[0].error // "Network-related operation failed"')"
+    recent_network_operation="$(echo "${FAILURE_ANALYSIS}" | jq -r '.networkRelatedFailures[0].operation // "Unknown operation"')"
+    
+    FINDINGS="$(echo "${FINDINGS}" | jq --arg error "${recent_network_error}" --arg operation "${recent_network_operation}" '. + [{
+      severity: "error",
+      code: "CLUSTER_NETWORK_FAILURE",
+      message: "Cluster failed due to network-related issues. Recent failure: \($error) (Operation: \($operation))",
+      recommendation: "Review network configuration including VNet integration, DNS settings, outbound connectivity, and private DNS zone links. Check Azure activity logs for detailed error information."
+    }]')"
+  fi
+  
+  # Check for general cluster failures that might be network-related
+  recent_failure_count="$(echo "${FAILURE_ANALYSIS}" | jq '.recentFailures | length')"
+  if [[ "${recent_failure_count}" -gt 0 && "${network_failure_count}" -eq 0 ]]; then
+    recent_error="$(echo "${FAILURE_ANALYSIS}" | jq -r '.recentFailures[0].statusMessage // .recentFailures[0].subStatus // "Cluster operation failed"')"
+    recent_operation="$(echo "${FAILURE_ANALYSIS}" | jq -r '.recentFailures[0].operationName // "Unknown operation"')"
+    
+    FINDINGS="$(echo "${FINDINGS}" | jq --arg error "${recent_error}" --arg operation "${recent_operation}" '. + [{
+      severity: "error",
+      code: "CLUSTER_OPERATION_FAILURE",
+      message: "Cluster failed with error: \($error) (Operation: \($operation))",
+      recommendation: "Review the specific error details and check if network configuration issues might be contributing to the failure."
+    }]')"
+  fi
+  
+  # Check for failed node pools
+  failed_node_pools="$(echo "${FAILURE_ANALYSIS}" | jq '[.nodePoolStatus[] | select(.provisioningState == "Failed") | .name]')"
+  if [[ "$(echo "${failed_node_pools}" | jq 'length')" -gt 0 ]]; then
+    failed_pools_list="$(echo "${failed_node_pools}" | jq -r 'join(", ")')"
+    FINDINGS="$(echo "${FINDINGS}" | jq --arg pools "${failed_pools_list}" '. + [{
+      severity: "error", 
+      code: "NODE_POOL_FAILURE",
+      message: "Node pools in failed state: \($pools)",
+      recommendation: "Check node pool configuration including subnet capacity, VM size availability, and network security group rules."
+    }]')"
+  fi
+fi
+
 # Check UDR configuration
 if [[ "${OUTBOUND_TYPE}" == "userDefinedRouting" ]]; then
   # Check if any route table has a default route
@@ -1077,6 +1200,7 @@ FINAL_REPORT="$(jq -n \
   --argjson privateDns "${PRIVATE_DNS_ANALYSIS}" \
   --argjson vmssAnalysis "${VMSS_ANALYSIS}" \
   --argjson apiProbe "${API_PROBE_RESULTS}" \
+  --argjson failureAnalysis "${FAILURE_ANALYSIS}" \
   --argjson findings "${FINDINGS}" \
   '{
     metadata: {
@@ -1120,6 +1244,7 @@ FINAL_REPORT="$(jq -n \
     },
     diagnostics: {
       apiConnectivityProbe: $apiProbe,
+      failureAnalysis: $failureAnalysis,
       findings: $findings
     }
   }')"
@@ -1170,6 +1295,37 @@ if [[ "$(echo "${AUTHORIZED_IP_RANGES}" | jq 'length')" -gt 0 ]]; then
   echo "${AUTHORIZED_IP_RANGES}" | jq -r '.[] | "  - " + .'
 fi
 echo
+
+# Add failure analysis section if cluster is in Failed state
+if [[ "${PROVISIONING_STATE}" == "Failed" ]] && [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.enabled')" == "true" ]]; then
+  echo "## ⚠️ Cluster Failure Analysis"
+  echo
+  echo "The cluster is in **Failed** provisioning state. Analysis of recent failures:"
+  echo
+  
+  # Recent failed operations
+  if [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.recentFailures | length')" -gt 0 ]]; then
+    echo "### Recent Failed Operations"
+    echo "$(echo "${FAILURE_ANALYSIS}" | jq -r '.recentFailures[] | "- **" + .timestamp + "** - " + .operationName + ": " + .status + (if .statusMessage then " (" + .statusMessage + ")" else "" end)')"
+    echo
+  fi
+  
+  # Network-related failures
+  if [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.networkRelatedFailures | length')" -gt 0 ]]; then
+    echo "### 🔗 Network-Related Failures"
+    echo "$(echo "${FAILURE_ANALYSIS}" | jq -r '.networkRelatedFailures[] | "- **" + .operationName + "** (" + .timestamp + ")" + (if .details then ": " + .details else "" end)')"
+    echo
+  fi
+  
+  # Node pool status
+  if [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.nodePoolStatus | length')" -gt 0 ]]; then
+    echo "### Node Pool Status"
+    echo "| Node Pool | Provisioning State | Power State |"
+    echo "|-----------|-------------------|-------------|"
+    echo "$(echo "${FAILURE_ANALYSIS}" | jq -r '.nodePoolStatus[] | "| " + .name + " | " + .provisioningState + " | " + .powerState + " |"')"
+    echo
+  fi
+fi
 
 echo "### Outbound Connectivity"
 echo "- **Outbound Type:** ${OUTBOUND_TYPE}"
