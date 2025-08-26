@@ -166,7 +166,8 @@ resolve_dns_location() {
   
   # Check if DNS IP is in any VNet CIDR
   echo "${vnets_json}" | jq -r --arg ip "${dns_ip}" '
-    .[] | select(.cidrs[] | . as $cidr | 
+    .[] | select(
+      (.cidrs // .addressSpace)[] | . as $cidr | 
       ($ip | split(".") | map(tonumber)) as $ip_parts |
       ($cidr | split("/")) as $cidr_parts |
       ($cidr_parts[0] | split(".") | map(tonumber)) as $net_parts |
@@ -179,6 +180,56 @@ resolve_dns_location() {
          ($prefix_len <= 24 or $ip_parts[3] == $net_parts[3]))
       else false end
     ) | .name'
+}
+
+# Helper function to get peered VNets and analyze their address spaces
+get_peered_vnets_analysis() {
+  local cluster_vnets_json="$1"
+  local peered_vnets_analysis="[]"
+  
+  # For each cluster VNet, get its peered VNets
+  for vnet_info in $(echo "${cluster_vnets_json}" | jq -r '.[] | @base64'); do
+    vnet_decoded="$(echo "${vnet_info}" | base64 --decode)"
+    vnet_name="$(echo "${vnet_decoded}" | jq -r '.name')"
+    vnet_id="$(echo "${vnet_decoded}" | jq -r '.id')"
+    peerings="$(echo "${vnet_decoded}" | jq -r '.peerings')"
+    
+    # For each peering, get the remote VNet details
+    for peering_info in $(echo "${peerings}" | jq -r '.[] | @base64' 2>/dev/null); do
+      if [[ -n "${peering_info}" ]]; then
+        peering_decoded="$(echo "${peering_info}" | base64 --decode)"
+        remote_vnet_id="$(echo "${peering_decoded}" | jq -r '.remoteVnetId')"
+        remote_vnet_name="$(echo "${peering_decoded}" | jq -r '.remoteVnetName')"
+        peering_state="$(echo "${peering_decoded}" | jq -r '.peeringState')"
+        
+        if [[ "${peering_state}" == "Connected" && -n "${remote_vnet_id}" ]]; then
+          # Get the remote VNet details
+          remote_vnet_json="$(az network vnet show --ids "${remote_vnet_id}" -o json 2>/dev/null || echo "{}")"
+          if [[ "$(echo "${remote_vnet_json}" | jq -r '.name // empty')" != "" ]]; then
+            remote_cidrs="$(echo "${remote_vnet_json}" | jq -r '.addressSpace.addressPrefixes')"
+            
+            peered_vnet_info="$(jq -n \
+              --arg id "${remote_vnet_id}" \
+              --arg name "${remote_vnet_name}" \
+              --argjson cidrs "${remote_cidrs}" \
+              --arg sourceVnet "${vnet_name}" \
+              --arg peeringState "${peering_state}" \
+              '{
+                id: $id,
+                name: $name,
+                cidrs: $cidrs,
+                sourceVnet: $sourceVnet,
+                peeringState: $peeringState
+              }')"
+            
+            peered_vnets_analysis="$(echo "${peered_vnets_analysis}" | jq --argjson vnet "${peered_vnet_info}" '. + [$vnet]')"
+          fi
+        fi
+      fi
+    done
+  done
+  
+  echo "${peered_vnets_analysis}"
 }
 
 # Function to analyze route tables
@@ -350,12 +401,43 @@ for subnet_id in "${SUBNET_IDS[@]}"; do
       peerings="[]"
     fi
     
-    # DNS analysis (simplified for now)
+    # DNS analysis with improved location detection
     dns_analysis="[]"
     if [[ "$(echo "${vnet_dns_servers}" | jq '. | length')" -gt 0 ]]; then
+      # First, get all peered VNets for better DNS location analysis
+      current_vnet_json="$(jq -n \
+        --arg id "${vnet_id}" \
+        --arg name "${vnet_name}" \
+        --argjson cidrs "${vnet_cidrs}" \
+        --argjson dns "${vnet_dns_servers}" \
+        --argjson peerings "${peerings}" \
+        '{
+          id: $id,
+          name: $name,
+          cidrs: $cidrs,
+          dnsServers: $dns,
+          peerings: $peerings
+        }')"
+      
+      peered_vnets="$(get_peered_vnets_analysis "[${current_vnet_json}]")"
+      
       for dns_ip in $(echo "${vnet_dns_servers}" | jq -r '.[]'); do
-        # Simplified DNS analysis - just mark as external for now
-        dns_analysis="$(echo "${dns_analysis}" | jq --arg ip "${dns_ip}" '. + [{ip: $ip, locationType: "external", hostingVnet: ""}]')"
+        # Check if DNS IP is in this VNet
+        dns_in_current_vnet="$(resolve_dns_location "${dns_ip}" "[${current_vnet_json}]")"
+        
+        if [[ -n "${dns_in_current_vnet}" ]]; then
+          dns_analysis="$(echo "${dns_analysis}" | jq --arg ip "${dns_ip}" --arg vnet "${dns_in_current_vnet}" '. + [{ip: $ip, locationType: "local", hostingVnet: $vnet}]')"
+        else
+          # Check if DNS IP is in any peered VNet
+          dns_in_peered_vnet="$(resolve_dns_location "${dns_ip}" "${peered_vnets}")"
+          
+          if [[ -n "${dns_in_peered_vnet}" ]]; then
+            dns_analysis="$(echo "${dns_analysis}" | jq --arg ip "${dns_ip}" --arg vnet "${dns_in_peered_vnet}" '. + [{ip: $ip, locationType: "peered", hostingVnet: $vnet}]')"
+          else
+            # External or unknown location
+            dns_analysis="$(echo "${dns_analysis}" | jq --arg ip "${dns_ip}" '. + [{ip: $ip, locationType: "external", hostingVnet: ""}]')"
+          fi
+        fi
       done
     fi
     
@@ -796,14 +878,81 @@ if [[ "${PRIVATE_CLUSTER_ENABLED}" == "true" && "${PRIVATE_DNS_ANALYSIS}" != "nu
     }]')"
   fi
   
-  # Check VNet links for custom DNS
+  # Enhanced VNet link validation for custom DNS scenarios
   if [[ "$(echo "${VNETS_ANALYSIS}" | jq '[.[] | select(.dnsServers | length > 0)] | length')" -gt 0 ]]; then
-    # Custom DNS servers are configured, check VNet links
+    # Custom DNS servers are configured, perform comprehensive VNet link analysis
+    vnet_links="$(echo "${PRIVATE_DNS_ANALYSIS}" | jq -r '.vnetLinks[]? // empty')"
+    api_zone="$(echo "${PRIVATE_DNS_ANALYSIS}" | jq -r '.zoneName // empty')"
+    
+    # Check each cluster VNet with custom DNS
+    for vnet_info in $(echo "${VNETS_ANALYSIS}" | jq -r '.[] | select(.dnsServers | length > 0) | @base64'); do
+      vnet_decoded="$(echo "${vnet_info}" | base64 --decode)"
+      vnet_name="$(echo "${vnet_decoded}" | jq -r '.name')"
+      vnet_id="$(echo "${vnet_decoded}" | jq -r '.id')"
+      dns_analysis="$(echo "${vnet_decoded}" | jq '.dnsAnalysis')"
+      
+      # Check if this cluster VNet is linked to the private DNS zone
+      cluster_vnet_linked=false
+      if [[ -n "${vnet_links}" ]]; then
+        if echo "${vnet_links}" | jq -e --arg vnet_id "${vnet_id}" '.virtualNetwork.id == $vnet_id' >/dev/null 2>&1; then
+          cluster_vnet_linked=true
+        fi
+      fi
+      
+      if [[ "${cluster_vnet_linked}" == "false" ]]; then
+        FINDINGS="$(echo "${FINDINGS}" | jq --arg vnet "${vnet_name}" --arg zone "${api_zone}" '. + [{
+          severity: "error",
+          code: "PDNS_CLUSTER_VNET_LINK_MISSING",
+          message: "Cluster VNet \($vnet) with custom DNS servers is not linked to private DNS zone \($zone)",
+          recommendation: "Add a virtual network link for VNet \($vnet) to private DNS zone \($zone) to enable proper DNS resolution"
+        }]')"
+      fi
+      
+      # Check for DNS servers in peered VNets that need DNS zone links
+      for dns_entry in $(echo "${dns_analysis}" | jq -r '.[] | select(.locationType == "peered") | @base64'); do
+        if [[ -n "${dns_entry}" ]]; then
+          dns_decoded="$(echo "${dns_entry}" | base64 --decode)"
+          dns_ip="$(echo "${dns_decoded}" | jq -r '.ip')"
+          hosting_vnet="$(echo "${dns_decoded}" | jq -r '.hostingVnet')"
+          
+          # Find the hosting VNet ID from peering information
+          hosting_vnet_id=""
+          for peering_info in $(echo "${vnet_decoded}" | jq -r '.peerings[] | @base64' 2>/dev/null); do
+            if [[ -n "${peering_info}" ]]; then
+              peering_decoded="$(echo "${peering_info}" | base64 --decode)"
+              remote_vnet_name="$(echo "${peering_decoded}" | jq -r '.remoteVnetName')"
+              
+              if [[ "${remote_vnet_name}" == "${hosting_vnet}" ]]; then
+                hosting_vnet_id="$(echo "${peering_decoded}" | jq -r '.remoteVnetId')"
+                break
+              fi
+            fi
+          done
+          
+          # Check if the hosting VNet is linked to the private DNS zone
+          if [[ -n "${hosting_vnet_id}" ]]; then
+            hosting_vnet_linked=false
+            if [[ -n "${vnet_links}" ]]; then
+              if echo "${vnet_links}" | jq -e --arg vnet_id "${hosting_vnet_id}" '.virtualNetwork.id == $vnet_id' >/dev/null 2>&1; then
+                hosting_vnet_linked=true
+              fi
+            fi
+            
+            if [[ "${hosting_vnet_linked}" == "false" ]]; then
+              FINDINGS="$(echo "${FINDINGS}" | jq --arg dns_ip "${dns_ip}" --arg hosting_vnet "${hosting_vnet}" --arg zone "${api_zone}" --arg cluster_vnet "${vnet_name}" '. + [{
+                severity: "error",
+                code: "PDNS_DNS_HOST_VNET_LINK_MISSING",
+                message: "DNS server \($dns_ip) is hosted in VNet \($hosting_vnet) but this VNet is not linked to private DNS zone \($zone). Cluster VNet \($cluster_vnet) uses this DNS server.",
+                recommendation: "Add a virtual network link for VNet \($hosting_vnet) to private DNS zone \($zone) to enable the DNS server to resolve private cluster names"
+              }]')"
+            fi
+          fi
+        fi
+      done
+    done
+    
+    # Legacy check for backward compatibility
     node_vnet_linked=false
-    
-    vnet_links="$(echo "${PRIVATE_DNS_ANALYSIS}" | jq -r '.vnetLinks[] // empty')"
-    
-    # Check if node VNets are linked
     for vnet_info in $(echo "${VNETS_ANALYSIS}" | jq -r '.[].id'); do
       vnet_name="$(basename "${vnet_info}")"
       if echo "${vnet_links}" | jq -e --arg name "${vnet_name}" '.virtualNetwork.id | contains($name)' >/dev/null 2>&1; then
@@ -812,7 +961,7 @@ if [[ "${PRIVATE_CLUSTER_ENABLED}" == "true" && "${PRIVATE_DNS_ANALYSIS}" != "nu
       fi
     done
     
-    if [[ "${node_vnet_linked}" == "false" ]]; then
+    if [[ "${node_vnet_linked}" == "false" && "$(echo "${FINDINGS}" | jq '[.[] | select(.code == "PDNS_CLUSTER_VNET_LINK_MISSING")] | length')" -eq 0 ]]; then
       FINDINGS="$(echo "${FINDINGS}" | jq '. + [{
         severity: "warning",
         code: "PDNS_NODE_VNET_LINK_MISSING",
@@ -868,19 +1017,33 @@ for vmss_info in $(echo "${VMSS_ANALYSIS}" | jq -r '.[] | @base64'); do
   fi
 done
 
-# Check for external DNS servers without clear forwarding path
+# Check for external DNS servers and custom DNS in peered VNets
 for vnet_info in $(echo "${VNETS_ANALYSIS}" | jq -r '.[] | @base64'); do
   vnet_decoded="$(echo "${vnet_info}" | base64 --decode)"
   vnet_name="$(echo "${vnet_decoded}" | jq -r '.name')"
   dns_analysis="$(echo "${vnet_decoded}" | jq '.dnsAnalysis')"
   
+  # Check for external DNS servers
   external_dns_count="$(echo "${dns_analysis}" | jq '[.[] | select(.locationType == "external")] | length')"
   if [[ "${external_dns_count}" -gt 0 ]]; then
-    FINDINGS="$(echo "${FINDINGS}" | jq --arg vnet "${vnet_name}" '. + [{
+    external_dns_ips="$(echo "${dns_analysis}" | jq -r '[.[] | select(.locationType == "external") | .ip] | join(", ")')"
+    FINDINGS="$(echo "${FINDINGS}" | jq --arg vnet "${vnet_name}" --arg ips "${external_dns_ips}" '. + [{
       severity: "info",
       code: "EXTERNAL_DNS_SERVERS",
-      message: "VNet \($vnet) uses external DNS servers",
+      message: "VNet \($vnet) uses external DNS servers: \($ips)",
       recommendation: "Ensure external DNS servers are reachable and can resolve private DNS zones if using private clusters"
+    }]')"
+  fi
+  
+  # Check for DNS servers in peered VNets (informational)
+  peered_dns_count="$(echo "${dns_analysis}" | jq '[.[] | select(.locationType == "peered")] | length')"
+  if [[ "${peered_dns_count}" -gt 0 ]]; then
+    peered_dns_info="$(echo "${dns_analysis}" | jq -r '[.[] | select(.locationType == "peered") | "\(.ip) (in \(.hostingVnet))"] | join(", ")')"
+    FINDINGS="$(echo "${FINDINGS}" | jq --arg vnet "${vnet_name}" --arg info "${peered_dns_info}" '. + [{
+      severity: "info",
+      code: "PEERED_VNET_DNS_SERVERS",
+      message: "VNet \($vnet) uses DNS servers in peered VNets: \($info)",
+      recommendation: "Ensure that peered VNets hosting DNS servers are properly linked to private DNS zones for correct resolution"
     }]')"
   fi
 done
@@ -1032,9 +1195,16 @@ for vnet_info in $(echo "${VNETS_ANALYSIS}" | jq -r '.[] | @base64'); do
     echo "- **Custom DNS Servers:**"
     echo "${dns_servers}" | jq -r '.[] | "  - " + .'
     
-    # Show DNS analysis
+    # Show DNS analysis with location details
     echo "- **DNS Server Analysis:**"
-    echo "${vnet_decoded}" | jq -r '.dnsAnalysis[] | "  - \(.ip): \(.locationType)" + (if .hostingVnet != "" then " (in \(.hostingVnet))" else "" end)'
+    echo "${vnet_decoded}" | jq -r '.dnsAnalysis[] | 
+      if .locationType == "local" then
+        "  - \(.ip): Local (in same VNet)"
+      elif .locationType == "peered" then
+        "  - \(.ip): Peered VNet (\(.hostingVnet))"
+      else
+        "  - \(.ip): External"
+      end'
   else
     echo "- **DNS:** Azure default"
   fi
