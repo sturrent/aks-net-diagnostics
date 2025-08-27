@@ -138,24 +138,6 @@ az account set --subscription "your-subscription-id"
 | `--subscription <ID>` | Azure subscription override | Current context |
 | `--cache` | Cache Azure CLI responses | No caching |
 
-## 🔗 Integration
-
-### CI/CD Pipeline
-```yaml
-- name: AKS Network Assessment
-  run: |
-    ./aks-net-diagnostics.sh -n ${{ env.CLUSTER_NAME }} -g ${{ env.RESOURCE_GROUP }} --no-json
-    # Process exit code for pipeline decisions
-```
-
-### Automation
-```bash
-# Monitor multiple clusters
-for cluster in prod-aks dev-aks staging-aks; do
-  ./aks-net-diagnostics.sh -n $cluster -g my-rg --json-out reports/$cluster.json
-done
-```
-
 ## 🆘 Troubleshooting
 
 | Error | Solution |

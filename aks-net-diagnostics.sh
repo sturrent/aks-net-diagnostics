@@ -1333,14 +1333,14 @@ if [[ "${PROVISIONING_STATE}" == "Failed" ]] && [[ "$(echo "${FAILURE_ANALYSIS}"
   # Recent failed operations
   if [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.recentFailures | length')" -gt 0 ]]; then
     echo "### Recent Failed Operations"
-    echo "$(echo "${FAILURE_ANALYSIS}" | jq -r '.recentFailures[] | "- **" + .timestamp + "** - " + .operationName + ": " + .status + (if .statusMessage then " (" + .statusMessage + ")" else "" end)')"
+    echo "$(echo "${FAILURE_ANALYSIS}" | jq -r '.recentFailures[] | "- **" + .timestamp + "** - " + .operationName + ": " + .status')"
     echo
   fi
   
   # Network-related failures
   if [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.networkRelatedFailures | length')" -gt 0 ]]; then
     echo "### 🔗 Network-Related Failures"
-    echo "$(echo "${FAILURE_ANALYSIS}" | jq -r '.networkRelatedFailures[] | "- **" + .operationName + "** (" + .timestamp + ")" + (if .details then ": " + .details else "" end)')"
+    echo "$(echo "${FAILURE_ANALYSIS}" | jq -r '.networkRelatedFailures[] | "- **" + .operationName + "** (" + .timestamp + ")"')"
     echo
   fi
   
