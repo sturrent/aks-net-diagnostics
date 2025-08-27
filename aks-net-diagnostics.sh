@@ -1198,6 +1198,42 @@ done
 # Step 9: Generate comprehensive JSON report
 echo "Generating comprehensive report..."
 
+# Ensure all JSON variables are properly initialized before final report generation
+echo "Validating JSON variables before report generation..."
+
+# Check and fix any null or malformed JSON variables
+if [[ -z "${VNETS_ANALYSIS}" || "${VNETS_ANALYSIS}" == "null" ]]; then
+  VNETS_ANALYSIS="[]"
+fi
+
+if [[ -z "${OUTBOUND_IPS}" || "${OUTBOUND_IPS}" == "null" ]]; then
+  OUTBOUND_IPS="[]"
+fi
+
+if [[ -z "${OUTBOUND_ANALYSIS}" || "${OUTBOUND_ANALYSIS}" == "null" ]]; then
+  OUTBOUND_ANALYSIS="{}"
+fi
+
+if [[ -z "${PRIVATE_DNS_ANALYSIS}" || "${PRIVATE_DNS_ANALYSIS}" == "null" ]]; then
+  PRIVATE_DNS_ANALYSIS="{}"
+fi
+
+if [[ -z "${VMSS_ANALYSIS}" || "${VMSS_ANALYSIS}" == "null" ]]; then
+  VMSS_ANALYSIS="[]"
+fi
+
+if [[ -z "${API_PROBE_RESULTS}" || "${API_PROBE_RESULTS}" == "null" ]]; then
+  API_PROBE_RESULTS="null"
+fi
+
+if [[ -z "${FAILURE_ANALYSIS}" || "${FAILURE_ANALYSIS}" == "null" ]]; then
+  FAILURE_ANALYSIS="{\"enabled\": false}"
+fi
+
+if [[ -z "${FINDINGS}" || "${FINDINGS}" == "null" ]]; then
+  FINDINGS="[]"
+fi
+
 FINAL_REPORT="$(jq -n \
   --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
   --arg aksName "${AKS_NAME}" \
@@ -1515,7 +1551,8 @@ else
     echo "**⚠️ Cluster Failure Summary:**"
     if [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.networkRelatedFailures | length')" -gt 0 ]]; then
       echo "- Network-related failures detected"
-      echo "- Primary error: $(echo "${FAILURE_ANALYSIS}" | jq -r '.networkRelatedFailures[0].error' | jq -r '.error.details[0].code // .error.code // "Unknown"' 2>/dev/null || echo "Unknown")"
+      primary_error="$(echo "${FAILURE_ANALYSIS}" | jq -r '.networkRelatedFailures[0].error' 2>/dev/null | jq -r '.error.details[0].code // .error.code // "Unknown"' 2>/dev/null || echo "Unknown")"
+      echo "- Primary error: ${primary_error}"
     fi
     if [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.nodePoolStatus | length')" -gt 0 ]]; then
       failed_pools="$(echo "${FAILURE_ANALYSIS}" | jq -r '.nodePoolStatus[] | select(.provisioningState == "Failed") | .name' | tr '\n' ' ')"
@@ -1551,6 +1588,24 @@ else
   if [[ "${critical_count}" -gt 0 ]]; then
     echo "**Critical Issues:**"
     echo "${FINDINGS}" | jq -r '.[] | select(.severity == "critical" or .severity == "error") | "- " + .code + ": " + .message' | head -3
+    echo
+  fi
+  
+  # Show API connectivity probe results if performed
+  if [[ ${PROBE_API} -eq 1 && "${API_PROBE_RESULTS}" != "null" ]]; then
+    echo "**🔍 API Connectivity Probe Results:**"
+    target_fqdn="$(echo "${API_PROBE_RESULTS}" | jq -r '.targetFqdn')"
+    vmss_name="$(echo "${API_PROBE_RESULTS}" | jq -r '.vmssName')"
+    exit_code="$(echo "${API_PROBE_RESULTS}" | jq -r '.exitCode')"
+    
+    echo "- Target: ${target_fqdn}"
+    echo "- Tested from: ${vmss_name}"
+    if [[ "${exit_code}" == "0" ]]; then
+      echo "- Result: ✅ SUCCESS (exit code: ${exit_code})"
+    else
+      echo "- Result: ❌ FAILED (exit code: ${exit_code})"
+    fi
+    echo "- Tip: Use --verbose for detailed probe output"
     echo
   fi
   
