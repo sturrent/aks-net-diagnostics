@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure compatibility with both bash and zsh
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  # Enable bash-like behavior for zsh
+  setopt SH_WORD_SPLIT
+  setopt NO_NOMATCH
+fi
+
 # AKS Network Diagnostics Script
 # Comprehensive read-only analysis of AKS cluster network configuration
 # Author: Azure Networking Diagnostics Generator
@@ -452,8 +459,16 @@ PRIVATE_FQDN="$(echo "${CLUSTER_JSON}" | jq -r '.privateFqdn // empty')"
 echo "Analyzing agent pools and network configuration..."
 AGENT_POOLS="$(azc aks nodepool list -g "${AKS_RG}" --cluster-name "${AKS_NAME}")"
 
-# Get unique subnet IDs using mapfile for proper array handling
-mapfile -t SUBNET_IDS < <(echo "${AGENT_POOLS}" | jq -r '.[].vnetSubnetId | select(.!=null)' | sort -u)
+# Get unique subnet IDs using cross-shell compatible method
+SUBNET_IDS=()
+subnet_ids_output="$(echo "${AGENT_POOLS}" | jq -r '.[].vnetSubnetId | select(.!=null)' | sort -u)"
+if [[ -n "${subnet_ids_output}" ]]; then
+  while IFS= read -r subnet_id; do
+    if [[ -n "${subnet_id}" ]]; then
+      SUBNET_IDS+=("${subnet_id}")
+    fi
+  done <<< "${subnet_ids_output}"
+fi
 
 if [[ ${#SUBNET_IDS[@]} -eq 0 ]]; then
   echo "Warning: No VNet-integrated node pools found. Using default Azure networking."
@@ -642,8 +657,19 @@ case "${OUTBOUND_TYPE}" in
       fi
     done
     
-    # Remove duplicates using mapfile
-    mapfile -t NAT_GATEWAY_IDS < <(printf '%s\n' "${NAT_GATEWAY_IDS[@]}" | sort -u)
+    # Remove duplicates using cross-shell compatible method
+    if [[ ${#NAT_GATEWAY_IDS[@]} -gt 0 ]]; then
+      nat_ids_output="$(printf '%s\n' "${NAT_GATEWAY_IDS[@]}" | sort -u)"
+      temp_array=()
+      if [[ -n "${nat_ids_output}" ]]; then
+        while IFS= read -r nat_id; do
+          if [[ -n "${nat_id}" ]]; then
+            temp_array+=("${nat_id}")
+          fi
+        done <<< "${nat_ids_output}"
+      fi
+      NAT_GATEWAY_IDS=("${temp_array[@]}")
+    fi
     
     NAT_GATEWAYS_ANALYSIS="[]"
     for nat_id in "${NAT_GATEWAY_IDS[@]}"; do
@@ -1198,40 +1224,44 @@ done
 # Step 9: Generate comprehensive JSON report
 echo "Generating comprehensive report..."
 
-# Ensure all JSON variables are properly initialized before final report generation
+# Ensure all JSON variables are properly formatted and valid
 echo "Validating JSON variables before report generation..."
 
-# Check and fix any null or malformed JSON variables
-if [[ -z "${VNETS_ANALYSIS}" || "${VNETS_ANALYSIS}" == "null" ]]; then
+# Validate and fix JSON arrays
+if [[ -z "${VNETS_ANALYSIS}" ]] || ! echo "${VNETS_ANALYSIS}" | jq empty >/dev/null 2>&1; then
   VNETS_ANALYSIS="[]"
 fi
 
-if [[ -z "${OUTBOUND_IPS}" || "${OUTBOUND_IPS}" == "null" ]]; then
+if [[ -z "${OUTBOUND_IPS}" ]] || ! echo "${OUTBOUND_IPS}" | jq empty >/dev/null 2>&1; then
   OUTBOUND_IPS="[]"
 fi
 
-if [[ -z "${OUTBOUND_ANALYSIS}" || "${OUTBOUND_ANALYSIS}" == "null" ]]; then
+if [[ -z "${FINDINGS}" ]] || ! echo "${FINDINGS}" | jq empty >/dev/null 2>&1; then
+  FINDINGS="[]"
+fi
+
+# Validate and fix JSON objects
+if [[ -z "${OUTBOUND_ANALYSIS}" ]] || ! echo "${OUTBOUND_ANALYSIS}" | jq empty >/dev/null 2>&1; then
   OUTBOUND_ANALYSIS="{}"
 fi
 
-if [[ -z "${PRIVATE_DNS_ANALYSIS}" || "${PRIVATE_DNS_ANALYSIS}" == "null" ]]; then
+if [[ -z "${PRIVATE_DNS_ANALYSIS}" ]] || ! echo "${PRIVATE_DNS_ANALYSIS}" | jq empty >/dev/null 2>&1; then
   PRIVATE_DNS_ANALYSIS="{}"
 fi
 
-if [[ -z "${VMSS_ANALYSIS}" || "${VMSS_ANALYSIS}" == "null" ]]; then
+if [[ -z "${VMSS_ANALYSIS}" ]] || ! echo "${VMSS_ANALYSIS}" | jq empty >/dev/null 2>&1; then
   VMSS_ANALYSIS="[]"
 fi
 
-if [[ -z "${API_PROBE_RESULTS}" || "${API_PROBE_RESULTS}" == "null" ]]; then
-  API_PROBE_RESULTS="null"
-fi
-
-if [[ -z "${FAILURE_ANALYSIS}" || "${FAILURE_ANALYSIS}" == "null" ]]; then
+if [[ -z "${FAILURE_ANALYSIS}" ]] || ! echo "${FAILURE_ANALYSIS}" | jq empty >/dev/null 2>&1; then
   FAILURE_ANALYSIS="{\"enabled\": false}"
 fi
 
-if [[ -z "${FINDINGS}" || "${FINDINGS}" == "null" ]]; then
-  FINDINGS="[]"
+# Handle null values for API probe results
+if [[ -z "${API_PROBE_RESULTS}" ]] || [[ "${API_PROBE_RESULTS}" == "null" ]]; then
+  API_PROBE_RESULTS="null"
+elif ! echo "${API_PROBE_RESULTS}" | jq empty >/dev/null 2>&1; then
+  API_PROBE_RESULTS="null"
 fi
 
 FINAL_REPORT="$(jq -n \
@@ -1269,33 +1299,33 @@ FINAL_REPORT="$(jq -n \
       generatedBy: "AKS Network Diagnostics Script"
     },
     cluster: {
-      name: $aksName,
-      resourceGroup: $resourceGroup,
-      subscription: $subscription,
-      provisioningState: $provisioningState,
-      location: $location,
-      nodeResourceGroup: $nodeResourceGroup,
+      name: (if $aksName == "" then null else $aksName end),
+      resourceGroup: (if $resourceGroup == "" then null else $resourceGroup end),
+      subscription: (if $subscription == "" then null else $subscription end),
+      provisioningState: (if $provisioningState == "" then null else $provisioningState end),
+      location: (if $location == "" then null else $location end),
+      nodeResourceGroup: (if $nodeResourceGroup == "" then null else $nodeResourceGroup end),
       networkProfile: {
-        networkPlugin: $networkPlugin,
-        serviceCidr: $serviceCidr,
-        dnsServiceIp: $dnsServiceIp,
-        podCidr: $podCidr,
-        outboundType: $outboundType
+        networkPlugin: (if $networkPlugin == "" then null else $networkPlugin end),
+        serviceCidr: (if $serviceCidr == "" then null else $serviceCidr end),
+        dnsServiceIp: (if $dnsServiceIp == "" then null else $dnsServiceIp end),
+        podCidr: (if $podCidr == "" then null else $podCidr end),
+        outboundType: (if $outboundType == "" then null else $outboundType end)
       },
       apiServerAccess: {
         privateClusterEnabled: ($privateClusterEnabled == "true"),
-        privateDnsZone: $privateDnsZone,
+        privateDnsZone: (if $privateDnsZone == "" then null else $privateDnsZone end),
         authorizedIpRanges: $authorizedIpRanges,
         vnetIntegrationEnabled: ($apiServerVnetIntegration == "true"),
-        vnetIntegrationSubnetId: $vnetIntegrationSubnet,
-        publicFqdn: $publicFqdn,
-        privateFqdn: $privateFqdn
+        vnetIntegrationSubnetId: (if $vnetIntegrationSubnet == "" then null else $vnetIntegrationSubnet end),
+        publicFqdn: (if $publicFqdn == "" then null else $publicFqdn end),
+        privateFqdn: (if $privateFqdn == "" then null else $privateFqdn end)
       }
     },
     networking: {
       vnets: $vnets,
       outbound: {
-        type: $outboundType,
+        type: (if $outboundType == "" then null else $outboundType end),
         effectivePublicIPs: $outboundIps,
         analysis: $outboundAnalysis
       },
@@ -1555,7 +1585,7 @@ else
       echo "- Primary error: ${primary_error}"
     fi
     if [[ "$(echo "${FAILURE_ANALYSIS}" | jq '.nodePoolStatus | length')" -gt 0 ]]; then
-      failed_pools="$(echo "${FAILURE_ANALYSIS}" | jq -r '.nodePoolStatus[] | select(.provisioningState == "Failed") | .name' | tr '\n' ' ')"
+      failed_pools="$(echo "${FAILURE_ANALYSIS}" | jq -r '.nodePoolStatus[] | select(.provisioningState == "Failed") | .name' | paste -sd ' ' -)"
       if [[ -n "${failed_pools}" ]]; then
         echo "- Failed node pools: ${failed_pools}"
       fi
@@ -1601,15 +1631,15 @@ else
     echo "- Target: ${target_fqdn}"
     echo "- Tested from: ${vmss_name}"
     if [[ "${exit_code}" == "0" ]]; then
-      echo "- Result: ✅ SUCCESS (exit code: ${exit_code})"
+      echo "- Result: SUCCESS (exit code: ${exit_code})"
     else
-      echo "- Result: ❌ FAILED (exit code: ${exit_code})"
+      echo "- Result: FAILED (exit code: ${exit_code})"
     fi
     echo "- Tip: Use --verbose for detailed probe output"
     echo
   fi
   
-  echo "💡 **Tip:** Use --verbose flag for detailed analysis or check the JSON report for complete findings."
+  echo "Tip: Use --verbose flag for detailed analysis or check the JSON report for complete findings."
   echo
 fi
 
