@@ -918,8 +918,13 @@ EXAMPLES:
             is_private = api_server_profile.get('enablePrivateCluster', False)
             
             if is_private:
-                # For private clusters, prioritize private FQDN
-                private_fqdn = self.cluster_info.get('privateFqdn', '')
+                # For private clusters, try multiple sources for private FQDN
+                private_fqdn = ''
+                if api_server_profile.get('privateFqdn'):
+                    private_fqdn = api_server_profile.get('privateFqdn', '')
+                elif self.cluster_info.get('privateFqdn'):
+                    private_fqdn = self.cluster_info.get('privateFqdn', '')
+                
                 if private_fqdn:
                     return f'https://{private_fqdn}'
             
@@ -928,8 +933,8 @@ EXAMPLES:
             if fqdn:
                 return f'https://{fqdn}'
             
-            # Final fallback to private FQDN if public is not available
-            private_fqdn = self.cluster_info.get('privateFqdn', '')
+            # Final fallback - try private FQDN from either location
+            private_fqdn = api_server_profile.get('privateFqdn', '') or self.cluster_info.get('privateFqdn', '')
             if private_fqdn:
                 return f'https://{private_fqdn}'
             
@@ -1834,7 +1839,15 @@ EXAMPLES:
         
         if is_private and api_server_profile:
             print("- **Type:** Private cluster")
-            print(f"- **Private FQDN:** {api_server_profile.get('privateFqdn', '')}")
+            
+            # Try multiple sources for private FQDN
+            private_fqdn = ''
+            if api_server_profile.get('privateFqdn'):
+                private_fqdn = api_server_profile.get('privateFqdn', '')
+            elif self.cluster_info.get('privateFqdn'):
+                private_fqdn = self.cluster_info.get('privateFqdn', '')
+            
+            print(f"- **Private FQDN:** {private_fqdn}")
             print(f"- **Private DNS Zone:** {api_server_profile.get('privateDnsZone', '')}")
         else:
             print("- **Type:** Public cluster")
