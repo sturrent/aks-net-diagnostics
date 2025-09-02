@@ -820,7 +820,7 @@ EXAMPLES:
                                 else:
                                     test_result['status'] = 'failed'
                                     test_result['error'] = "DNS resolved to public IP instead of private IP. Private DNS zone link may be missing or misconfigured."
-                            elif self._check_expected_output(stdout, expected_keywords):
+                            elif self._check_expected_output_combined(test, stdout, stderr, expected_keywords):
                                 test_result['status'] = 'passed'
                             else:
                                 test_result['status'] = 'failed'
@@ -883,12 +883,34 @@ EXAMPLES:
                 return False
         return True
     
+    def _check_expected_output_combined(self, test, stdout, stderr, expected_keywords):
+        """Check if output contains expected keywords, looking in both stdout and stderr for HTTP tests"""
+        if not expected_keywords:
+            return True  # No specific expectations
+        
+        # For HTTP connectivity tests, curl -v puts connection info in stderr
+        test_name = test.get('name', '').lower()
+        if 'http' in test_name or 'connectivity' in test_name:
+            # Combine stdout and stderr for HTTP tests since curl -v uses stderr for connection details
+            combined_output = f"{stdout}\n{stderr}".lower()
+            for keyword in expected_keywords:
+                if keyword.lower() not in combined_output:
+                    return False
+            return True
+        else:
+            # For other tests (like DNS), use only stdout
+            return self._check_expected_output(stdout, expected_keywords)
+    
     def _validate_private_dns_resolution(self, nslookup_output, hostname):
         """Validate that DNS resolution returns a private IP address for private clusters"""
         import ipaddress
         import re
         
         try:
+            # Check for DNS resolution failures first
+            if any(error in nslookup_output.lower() for error in ['nxdomain', 'servfail', 'refused', "can't find"]):
+                return False  # DNS resolution failed completely
+            
             # Parse nslookup output to extract IP addresses
             # Look for lines like "Address: 10.1.2.3" or "10.1.2.3"
             ip_pattern = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
@@ -897,8 +919,19 @@ EXAMPLES:
             if not found_ips:
                 return False  # No IP addresses found
             
-            # Check if any of the found IPs are private
-            for ip_str in found_ips:
+            # Filter out DNS server IPs (usually the first IP listed)
+            # DNS server IPs are typically shown as "Server: 10.1.0.10" or "Address: 10.1.0.10#53"
+            dns_server_pattern = r'(?:Server:|Address:)\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})(?:#\d+)?'
+            dns_server_ips = set(re.findall(dns_server_pattern, nslookup_output))
+            
+            # Check resolved IPs (excluding DNS server IPs)
+            resolved_ips = [ip for ip in found_ips if ip not in dns_server_ips]
+            
+            if not resolved_ips:
+                return False  # Only DNS server IPs found, no actual resolution
+            
+            # Check if any of the resolved IPs are private
+            for ip_str in resolved_ips:
                 try:
                     ip = ipaddress.ip_address(ip_str)
                     # Check if this is a private IP address
@@ -913,8 +946,8 @@ EXAMPLES:
             return False
             
         except Exception as e:
-            # If we can't parse the output, fall back to basic keyword check
-            return 'address:' in nslookup_output.lower() and hostname.split('.')[0].lower() in nslookup_output.lower()
+            # If we can't parse the output, fall back to checking for resolution errors
+            return not any(error in nslookup_output.lower() for error in ['nxdomain', 'servfail', 'refused', "can't find"])
     
     def analyze_misconfigurations(self):
         """Analyze potential misconfigurations and failures"""
