@@ -792,15 +792,22 @@ EXAMPLES:
             }
         }
         
-        # Get VMSS instances for testing
-        vmss_instances = self._get_vmss_instances()
+        # Get VMSS instances for testing (limited to first available for performance)
+        vmss_instances = self._get_vmss_instances_for_connectivity()
         if not vmss_instances:
             self.logger.info("No VMSS instances found for connectivity testing")
             return
         
-        # Run connectivity tests
-        for vmss_info in vmss_instances:
-            self._run_vmss_connectivity_tests(vmss_info)
+        # Run connectivity tests on only the first available VMSS to avoid long execution times
+        # in clusters with many node pools
+        first_vmss = vmss_instances[0]
+        total_vmss_count = len(vmss_instances)
+        if total_vmss_count > 1:
+            self.logger.info(f"Found {total_vmss_count} VMSS instance(s). Testing connectivity from the first one: {first_vmss['vmss_name']} (skipping {total_vmss_count - 1} others for performance)")
+        else:
+            self.logger.info(f"Found {total_vmss_count} VMSS instance(s). Testing connectivity from: {first_vmss['vmss_name']}")
+        
+        self._run_vmss_connectivity_tests(first_vmss)
     
     def _get_vmss_instances(self):
         """Get VMSS instances suitable for connectivity testing"""
@@ -825,7 +832,7 @@ EXAMPLES:
                         instances = self.run_azure_cli(instances_cmd)
                         
                         if isinstance(instances, list) and instances:
-                            # Use the first running instance
+                            # Use the first running instance from this VMSS
                             for instance in instances:
                                 if instance.get('provisioningState') == 'Succeeded':
                                     vmss_instances.append({
@@ -838,6 +845,51 @@ EXAMPLES:
             
         except Exception as e:
             self.logger.info(f"Error getting VMSS instances: {e}")
+        
+        return vmss_instances
+
+    def _get_vmss_instances_for_connectivity(self):
+        """Get VMSS instances for connectivity testing (optimized to return only one)"""
+        vmss_instances = []
+        
+        try:
+            # Get managed cluster resource group
+            mc_rg = self.cluster_info.get('nodeResourceGroup', '')
+            if not mc_rg:
+                return vmss_instances
+            
+            # List VMSS in the managed cluster resource group
+            cmd = ['vmss', 'list', '-g', mc_rg, '-o', 'json']
+            vmss_list = self.run_azure_cli(cmd)
+            
+            if isinstance(vmss_list, list):
+                # Collect all VMSS first to report total count
+                all_vmss = []
+                for vmss in vmss_list:
+                    vmss_name = vmss.get('name', '')
+                    if vmss_name:
+                        # Get instances for this VMSS
+                        instances_cmd = ['vmss', 'list-instances', '-g', mc_rg, '-n', vmss_name, '-o', 'json']
+                        instances = self.run_azure_cli(instances_cmd)
+                        
+                        if isinstance(instances, list) and instances:
+                            # Find the first running instance from this VMSS
+                            for instance in instances:
+                                if instance.get('provisioningState') == 'Succeeded':
+                                    vmss_instance = {
+                                        'vmss_name': vmss_name,
+                                        'resource_group': mc_rg,
+                                        'instance_id': str(instance.get('instanceId', '0')),
+                                        'vmss_info': vmss
+                                    }
+                                    all_vmss.append(vmss_instance)
+                                    break  # Only need one instance per VMSS
+                
+                # Return all VMSS for reporting, but connectivity testing will only use the first one
+                vmss_instances = all_vmss
+            
+        except Exception as e:
+            self.logger.info(f"Error getting VMSS instances for connectivity testing: {e}")
         
         return vmss_instances
     
@@ -858,8 +910,8 @@ EXAMPLES:
                 'expected_keywords': ['Address:', 'mcr.microsoft.com']
             },
             {
-                'name': 'HTTP Connectivity - Microsoft Container Registry',
-                'script': 'curl -kv --connect-timeout 5 --max-time 10 mcr.microsoft.com',
+                'name': 'HTTPS Connectivity - Microsoft Container Registry',
+                'script': 'curl -kv --connect-timeout 5 --max-time 10 https://mcr.microsoft.com',
                 'timeout': 15,
                 'expected_keywords': ['HTTP/', 'Connected to']
             },
@@ -868,6 +920,12 @@ EXAMPLES:
                 'script': 'nslookup management.azure.com',
                 'timeout': 10,
                 'expected_keywords': ['Address:', 'management.azure.com']
+            },
+            {
+                'name': 'HTTPS Connectivity - Azure Management',
+                'script': 'curl -kv --connect-timeout 5 --max-time 10 https://management.azure.com',
+                'timeout': 15,
+                'expected_keywords': ['HTTP/', 'Connected to']
             }
         ]
         
@@ -1113,11 +1171,33 @@ EXAMPLES:
                                 else:
                                     test_result['status'] = 'failed'
                                     test_result['error'] = "DNS resolved to public IP instead of private IP. Private DNS zone link may be missing or misconfigured."
-                            elif self._check_expected_output_combined(test, stdout, stderr, expected_keywords):
-                                test_result['status'] = 'passed'
                             else:
-                                test_result['status'] = 'failed'
-                                test_result['error'] = f"Expected output not found. Keywords: {expected_keywords}"
+                                # For all other tests, the exit code is the primary indicator of success
+                                # Only if exit code is 0 AND expected keywords are found, mark as passed
+                                if exit_code == 0:
+                                    if self._check_expected_output_combined(test, stdout, stderr, expected_keywords):
+                                        test_result['status'] = 'passed'
+                                    else:
+                                        test_result['status'] = 'failed'
+                                        test_result['error'] = f"Command succeeded but expected output not found. Keywords: {expected_keywords}"
+                                else:
+                                    # Exit code != 0 means the command failed
+                                    test_result['status'] = 'failed'
+                                    # Provide more specific error messages based on the test type
+                                    test_name = test.get('name', '').lower()
+                                    if 'connectivity' in test_name or 'http' in test_name:
+                                        if 'ssl' in stderr.lower() or 'tls' in stderr.lower():
+                                            test_result['error'] = f"HTTPS connection failed due to SSL/TLS error (exit code: {exit_code})"
+                                        elif 'timeout' in stderr.lower():
+                                            test_result['error'] = f"Connection timeout (exit code: {exit_code})"
+                                        elif 'refused' in stderr.lower():
+                                            test_result['error'] = f"Connection refused (exit code: {exit_code})"
+                                        else:
+                                            test_result['error'] = f"HTTP connectivity test failed (exit code: {exit_code})"
+                                    elif 'dns' in test_name:
+                                        test_result['error'] = f"DNS resolution failed (exit code: {exit_code})"
+                                    else:
+                                        test_result['error'] = f"Command failed with exit code: {exit_code}"
                         else:
                             test_result['status'] = 'failed'
                             test_result['error'] = f"VMSS command failed: {first_result.get('displayStatus', 'Unknown error')}"

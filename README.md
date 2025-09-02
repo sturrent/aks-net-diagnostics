@@ -1,44 +1,48 @@
 # AKS Network Diagnostics Tool
 
-A comprehensive Bash script for analyzing Azure Kubernetes Service (AKS) cluster network configurations. Performs read-only analysis to diagnose networking issues, validate configurations, and detect misconfigurations in AKS clusters.
+A comprehensive Python script for analyzing Azure Kubernetes Service (AKS) cluster network configurations. Performs read-only analysis to diagnose networking issues, validate configurations, and detect misconfigurations including User Defined Routes (UDRs) and virtual appliance routing.
 
 ## 🚀 Quick Start
 
 ```bash
 # Basic analysis with summary output
-./aks-net-diagnostics.sh -n my-cluster -g my-resource-group
+python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group
 
 # Detailed analysis with verbose output
-./aks-net-diagnostics.sh -n my-cluster -g my-resource-group --verbose
+python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --verbose
 
-# Skip JSON report generation
-./aks-net-diagnostics.sh -n my-cluster -g my-resource-group --no-json
+# Include active connectivity testing from cluster nodes
+python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-api
 ```
 
 ## ✨ Key Features
 
 ### **🔍 Comprehensive Analysis**
+
 - **Network Configuration**: Outbound types (LoadBalancer/NAT Gateway/UDR), VNet topology, DNS settings
+- **UDR Analysis**: User Defined Routes detection, virtual appliance routing, traffic impact assessment  
 - **Private Clusters**: DNS zone validation, VNet links, private endpoint verification
 - **Security Assessment**: NSG rules, route tables, authorized IP ranges
-- **Failure Analysis**: Azure activity logs, cluster failure correlation, node pool status
+- **Active Connectivity**: Optional VMSS-based testing (DNS resolution, HTTPS connectivity, API server access)
 
 ### **📊 Smart Output Modes**
+
 - **Summary Mode** (default): Concise findings with key issues highlighted
-- **Verbose Mode** (`--verbose`): Detailed report with comprehensive analysis
-- **JSON Reports**: Structured data saved to auto-generated files for automation
+- **Verbose Mode** (`--verbose`): Detailed report with comprehensive analysis and test outputs
+- **JSON Reports**: Structured data automatically saved to timestamped files
 
 ### **🛡️ Production Safe**
+
 - **Read-Only**: Uses only Azure CLI show/list commands
 - **Optional Probing**: Active connectivity tests require explicit `--probe-api` flag
-- **Secure**: No modifications to cluster or Azure resources
+- **Performance Optimized**: Limits connectivity testing to single VMSS instance
 
 ## 📋 Prerequisites
 
 ```bash
 # Required tools
-az --version    # Azure CLI 2.0+
-jq --version    # JSON processor
+python3 --version     # Python 3.6+
+az --version          # Azure CLI 2.0+
 
 # Azure authentication
 az login
@@ -48,111 +52,91 @@ az account set --subscription "your-subscription-id"
 ## 🎯 Usage Examples
 
 ### Basic Commands
+
 ```bash
 # Standard analysis (summary + JSON report)
-./aks-net-diagnostics.sh -n prod-cluster -g prod-rg
+python3 aks-net-diagnostics.py -n prod-cluster -g prod-rg
 
 # Detailed analysis for troubleshooting
-./aks-net-diagnostics.sh -n failed-cluster -g rg --verbose
+python3 aks-net-diagnostics.py -n failed-cluster -g rg --verbose
 
-# Quick check without saving JSON
-./aks-net-diagnostics.sh -n dev-cluster -g dev-rg --no-json
-
-# Custom JSON filename
-./aks-net-diagnostics.sh -n cluster -g rg --json-out my-report.json
+# Active connectivity testing (executes commands in cluster nodes)
+python3 aks-net-diagnostics.py -n cluster -g rg --probe-api
 ```
 
 ### Advanced Options
+
 ```bash
-# Active connectivity testing (executes commands in cluster nodes)
-./aks-net-diagnostics.sh -n cluster -g rg --probe-api
+# All options combined
+python3 aks-net-diagnostics.py -n cluster -g rg --verbose --probe-api
 
 # Specific subscription
-./aks-net-diagnostics.sh -n cluster -g rg --subscription "12345678-1234-1234-1234-123456789012"
-
-# All options
-./aks-net-diagnostics.sh -n cluster -g rg --verbose --probe-api --json-out report.json --cache
+python3 aks-net-diagnostics.py -n cluster -g rg --subscription "12345678-1234-1234-1234-123456789012"
 ```
 
 ## 📊 Sample Output
 
 ### Summary Mode (Default)
-```
+
+```text
 # AKS Network Assessment Summary
 
-**Cluster:** my-cluster (Failed)
+**Cluster:** my-cluster (Succeeded)
 **Resource Group:** my-rg
-**Generated:** 2025-08-26 15:30:45 UTC
+**Generated:** 2025-09-02 23:30:45 UTC
 
 **Configuration:**
 - Network Plugin: azure
 - Outbound Type: loadBalancer
-- Private Cluster: true
+- Private Cluster: false
 
-**⚠️ Cluster Failure Summary:**
-- Network-related failures detected
-- Primary error: VMExtensionError_K8SAPIServerDNSLookupFail
+**Outbound IPs:**
+- 130.107.205.36
+
+**UDR Analysis:**
+- Route Tables: 1 (aks-udr)
+- Virtual Appliance Routes: 1 (10.0.1.4)
+- High Impact Routes: 1
+
+**Connectivity Tests:** (6 total)
+- ✅ DNS Resolution: 3/3 passed
+- ❌ HTTPS Connectivity: 0/3 passed (blocked by firewall)
 
 **Findings Summary:**
-- 🔴 2 Critical/Error issue(s)
-- 🟡 1 Warning(s)
-- ℹ️ 1 Informational finding(s)
-
-**Critical Issues:**
-- PDNS_DNS_HOST_VNET_LINK_MISSING: DNS server in peered VNet not linked to private DNS zone
-- CLUSTER_NETWORK_FAILURE: Cluster failed due to DNS configuration issues
+- ❌ 2 Critical/Error issue(s)
+- ⚠️ 3 Warning issue(s)
 
 💡 Tip: Use --verbose flag for detailed analysis
-📄 JSON report saved to: aks-network-report_my-cluster_20250826_153045.json
+📄 JSON report saved to: aks-net-diagnostics_my-cluster_20250902_233045.json
 ```
 
 ## 🔍 What It Detects
 
 ### **Common Issues**
+
 | Code | Issue | Severity |
 |------|-------|----------|
+| `UDR_HIGH_IMPACT_ROUTE` | Default route (0.0.0.0/0) redirects traffic to virtual appliance | ❌ Critical |
+| `UDR_DEFAULT_ROUTE_VA` | Virtual appliance routing may affect AKS connectivity | ⚠️ Warning |
+| `CONNECTIVITY_HTTPS_FAILURE` | HTTPS connectivity tests failed (firewall/NSG blocking) | ❌ Critical |
+| `CONNECTIVITY_API_SERVER_FAILURE` | API server connectivity test failed | ❌ Critical |
 | `PDNS_DNS_HOST_VNET_LINK_MISSING` | DNS server in peered VNet not linked to private DNS zone | ❌ Critical |
-| `CLUSTER_NETWORK_FAILURE` | Cluster provisioning failed due to network issues | ❌ Critical |
-| `UDR_MISSING_DEFAULT_ROUTE` | User-defined routing without default route | ❌ Critical |
-| `NSG_BLOCKS_API_ACCESS` | NSG rules may block API server access | ⚠️ Warning |
-| `PEERED_VNET_DNS_SERVERS` | VNet uses DNS servers in peered VNets | ℹ️ Info |
 
 ### **Analysis Coverage**
-- ✅ **Cluster State**: Provisioning status, failure reasons, node pool health
+
+- ✅ **Cluster State**: Provisioning status, power state, network plugin configuration
 - ✅ **Network Topology**: VNets, subnets, peerings, DNS configuration
 - ✅ **Outbound Connectivity**: Load balancers, NAT gateways, effective public IPs
+- ✅ **UDR Analysis**: Route tables, virtual appliance detection, traffic impact assessment
 - ✅ **Private DNS**: Zone validation, VNet links, A record verification
-- ✅ **Security**: NSG rules, route tables, authorized IP ranges
-- ✅ **Failure Correlation**: Activity logs linked to network misconfigurations
+- ✅ **Active Testing**: DNS resolution, HTTPS connectivity, API server access (optional)
 
-## � Command Line Options
+## 📋 Command Line Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-n <NAME>` | AKS cluster name | Required |
 | `-g <GROUP>` | Resource group name | Required |
-| `--verbose` | Show detailed analysis output | Summary mode |
-| `--no-json` | Skip JSON report generation | Auto-generated JSON |
-| `--json-out <FILE>` | Custom JSON filename | `aks-network-report_<cluster>_<timestamp>.json` |
-| `--probe-api` | Enable active connectivity tests | Disabled |
+| `--verbose` | Show detailed analysis output and test results | Summary mode |
+| `--probe-api` | Enable active connectivity tests from cluster nodes | Disabled |
 | `--subscription <ID>` | Azure subscription override | Current context |
-| `--cache` | Cache Azure CLI responses | No caching |
-
-## 🆘 Troubleshooting
-
-| Error | Solution |
-|-------|----------|
-| `Not logged into Azure CLI` | Run `az login` |
-| `jq is required but not found` | Install jq: `sudo apt install jq` |
-| `Failed to fetch cluster information` | Check Azure permissions (Reader role required) |
-
-## 📚 Documentation
-
-- [AKS Outbound Types](https://learn.microsoft.com/azure/aks/egress-outboundtype)
-- [Private AKS Clusters](https://learn.microsoft.com/azure/aks/private-clusters)
-- [Private DNS Zones](https://learn.microsoft.com/azure/dns/private-dns-overview)
-- [AKS Network Concepts](https://learn.microsoft.com/azure/aks/concepts-network)
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
