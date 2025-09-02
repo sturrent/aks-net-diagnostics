@@ -271,9 +271,15 @@ EXAMPLES:
         elif outbound_type == 'managedNATGateway':
             self._analyze_nat_gateway_outbound()
         
+        # Always check for UDRs on node subnets regardless of outbound type
+        # This helps detect scenarios where Azure Firewall is used with Load Balancer outbound
+        self.logger.info("  - Checking for UDRs on node subnets...")
+        udr_analysis = self._analyze_node_subnet_udrs()
+        
         self.outbound_analysis = {
             "type": outbound_type,
-            "effectivePublicIPs": self.outbound_ips
+            "effectivePublicIPs": self.outbound_ips,
+            "udrAnalysis": udr_analysis if udr_analysis.get("routeTables") else None
         }
     
     def _analyze_load_balancer_outbound(self):
@@ -381,14 +387,284 @@ EXAMPLES:
     def _analyze_udr_outbound(self):
         """Analyze User Defined Routing outbound configuration"""
         self.logger.info("  - Analyzing User Defined Routing configuration...")
-        # UDR analysis would go here
-        pass
+        
+        # Get route table information for node subnets
+        udr_analysis = self._analyze_node_subnet_udrs()
+        
+        # Store UDR analysis results
+        self.outbound_analysis = {
+            "type": "userDefinedRouting",
+            "routeTables": udr_analysis.get("routeTables", []),
+            "criticalRoutes": udr_analysis.get("criticalRoutes", []),
+            "virtualApplianceRoutes": udr_analysis.get("virtualApplianceRoutes", []),
+            "internetRoutes": udr_analysis.get("internetRoutes", [])
+        }
     
     def _analyze_nat_gateway_outbound(self):
         """Analyze NAT Gateway outbound configuration"""
         self.logger.info("  - Analyzing NAT Gateway configuration...")
         # NAT Gateway analysis would go here
         pass
+
+    def _analyze_node_subnet_udrs(self):
+        """Analyze User Defined Routes on node subnets"""
+        self.logger.info("    Analyzing UDRs on node subnets...")
+        
+        udr_analysis = {
+            "routeTables": [],
+            "criticalRoutes": [],
+            "virtualApplianceRoutes": [],
+            "internetRoutes": []
+        }
+        
+        # Get unique subnet IDs from agent pools
+        subnet_ids = set()
+        for pool in self.agent_pools:
+            subnet_id = pool.get('vnetSubnetId')
+            if subnet_id and subnet_id != "null":
+                subnet_ids.add(subnet_id)
+        
+        if not subnet_ids:
+            self.logger.info("    No VNet-integrated node pools found")
+            return udr_analysis
+        
+        # Analyze each subnet for route tables
+        for subnet_id in subnet_ids:
+            try:
+                subnet_info = self._get_subnet_details(subnet_id)
+                if not subnet_info:
+                    continue
+                
+                route_table = subnet_info.get('routeTable')
+                if route_table and route_table.get('id'):
+                    route_table_id = route_table['id']
+                    self.logger.info(f"    Found route table: {route_table_id}")
+                    
+                    # Get route table details
+                    rt_analysis = self._analyze_route_table(route_table_id, subnet_id)
+                    if rt_analysis:
+                        udr_analysis["routeTables"].append(rt_analysis)
+                        
+                        # Categorize routes
+                        for route in rt_analysis.get("routes", []):
+                            self._categorize_route(route, udr_analysis)
+                else:
+                    self.logger.info(f"    No route table associated with subnet: {subnet_id}")
+                    
+            except Exception as e:
+                self.logger.info(f"    Error analyzing subnet {subnet_id}: {e}")
+        
+        return udr_analysis
+    
+    def _get_subnet_details(self, subnet_id):
+        """Get detailed information about a subnet"""
+        try:
+            # Parse subnet ID to extract components
+            parts = subnet_id.split('/')
+            if len(parts) < 11:
+                return None
+            
+            subscription_id = parts[2]
+            resource_group = parts[4]
+            vnet_name = parts[8]
+            subnet_name = parts[10]
+            
+            # Get subnet details
+            cmd = ['network', 'vnet', 'subnet', 'show', 
+                   '--subscription', subscription_id,
+                   '-g', resource_group, 
+                   '--vnet-name', vnet_name, 
+                   '-n', subnet_name, 
+                   '-o', 'json']
+            
+            return self.run_azure_cli(cmd)
+            
+        except Exception as e:
+            self.logger.info(f"    Error getting subnet details for {subnet_id}: {e}")
+            return None
+    
+    def _analyze_route_table(self, route_table_id, subnet_id):
+        """Analyze a specific route table"""
+        try:
+            # Parse route table ID
+            parts = route_table_id.split('/')
+            if len(parts) < 9:
+                return None
+            
+            subscription_id = parts[2]
+            resource_group = parts[4]
+            route_table_name = parts[8]
+            
+            # Get route table details
+            cmd = ['network', 'route-table', 'show',
+                   '--subscription', subscription_id,
+                   '-g', resource_group,
+                   '-n', route_table_name,
+                   '-o', 'json']
+            
+            route_table_info = self.run_azure_cli(cmd)
+            
+            if not route_table_info:
+                return None
+            
+            analysis = {
+                "id": route_table_id,
+                "name": route_table_name,
+                "resourceGroup": resource_group,
+                "associatedSubnet": subnet_id,
+                "routes": [],
+                "disableBgpRoutePropagation": route_table_info.get('disableBgpRoutePropagation', False)
+            }
+            
+            # Analyze each route
+            routes = route_table_info.get('routes', [])
+            for route in routes:
+                route_analysis = self._analyze_individual_route(route)
+                if route_analysis:
+                    analysis["routes"].append(route_analysis)
+            
+            self.logger.info(f"    Route table {route_table_name} has {len(routes)} route(s)")
+            
+            return analysis
+            
+        except Exception as e:
+            self.logger.info(f"    Error analyzing route table {route_table_id}: {e}")
+            return None
+    
+    def _analyze_individual_route(self, route):
+        """Analyze an individual route"""
+        try:
+            next_hop_type = route.get('nextHopType', '')
+            address_prefix = route.get('addressPrefix', '')
+            next_hop_ip = route.get('nextHopIpAddress', '')
+            route_name = route.get('name', '')
+            
+            analysis = {
+                "name": route_name,
+                "addressPrefix": address_prefix,
+                "nextHopType": next_hop_type,
+                "nextHopIpAddress": next_hop_ip,
+                "provisioningState": route.get('provisioningState', ''),
+                "impact": self._assess_route_impact(address_prefix, next_hop_type, next_hop_ip)
+            }
+            
+            return analysis
+            
+        except Exception as e:
+            self.logger.info(f"    Error analyzing route: {e}")
+            return None
+    
+    def _assess_route_impact(self, address_prefix, next_hop_type, next_hop_ip):
+        """Assess the potential impact of a route on AKS connectivity"""
+        impact = {
+            "severity": "info",
+            "description": "",
+            "affectedTraffic": []
+        }
+        
+        # Check for default route (0.0.0.0/0)
+        if address_prefix == "0.0.0.0/0":
+            if next_hop_type == "VirtualAppliance":
+                impact["severity"] = "high"
+                impact["description"] = "Default route redirects ALL internet traffic to virtual appliance"
+                impact["affectedTraffic"] = ["internet", "container_registry", "azure_services", "api_server"]
+            elif next_hop_type == "None":
+                impact["severity"] = "critical"
+                impact["description"] = "Default route drops ALL internet traffic (blackhole)"
+                impact["affectedTraffic"] = ["internet", "container_registry", "azure_services", "api_server"]
+            elif next_hop_type == "Internet":
+                impact["severity"] = "low"
+                impact["description"] = "Explicit default route to internet (may override system routes)"
+                impact["affectedTraffic"] = ["internet"]
+        
+        # Check for Azure service routes
+        elif self._is_azure_service_prefix(address_prefix):
+            if next_hop_type == "VirtualAppliance":
+                impact["severity"] = "medium"
+                impact["description"] = f"Azure service traffic ({address_prefix}) redirected to virtual appliance"
+                impact["affectedTraffic"] = ["azure_services"]
+            elif next_hop_type == "None":
+                impact["severity"] = "high"
+                impact["description"] = f"Azure service traffic ({address_prefix}) blocked"
+                impact["affectedTraffic"] = ["azure_services"]
+        
+        # Check for container registry routes
+        elif self._is_container_registry_prefix(address_prefix):
+            if next_hop_type == "VirtualAppliance":
+                impact["severity"] = "medium"
+                impact["description"] = f"Container registry traffic ({address_prefix}) redirected to virtual appliance"
+                impact["affectedTraffic"] = ["container_registry"]
+            elif next_hop_type == "None":
+                impact["severity"] = "high"
+                impact["description"] = f"Container registry traffic ({address_prefix}) blocked"
+                impact["affectedTraffic"] = ["container_registry"]
+        
+        # Check for private network routes
+        elif self._is_private_network_prefix(address_prefix):
+            if next_hop_type == "VirtualAppliance":
+                impact["severity"] = "low"
+                impact["description"] = f"Private network traffic ({address_prefix}) redirected to virtual appliance"
+                impact["affectedTraffic"] = ["private_network"]
+        
+        return impact
+    
+    def _is_azure_service_prefix(self, address_prefix):
+        """Check if address prefix covers Azure service endpoints"""
+        # Common Azure service IP ranges (simplified check)
+        azure_prefixes = [
+            "13.", "20.", "23.", "40.", "52.", "104.", "168.", "191."
+        ]
+        return any(address_prefix.startswith(prefix) for prefix in azure_prefixes)
+    
+    def _is_container_registry_prefix(self, address_prefix):
+        """Check if address prefix covers container registry endpoints"""
+        # Microsoft Container Registry typically uses these ranges
+        mcr_prefixes = [
+            "20.81.", "20.117.", "52.159.", "52.168."
+        ]
+        return any(address_prefix.startswith(prefix) for prefix in mcr_prefixes)
+    
+    def _is_private_network_prefix(self, address_prefix):
+        """Check if address prefix is for private networks"""
+        private_prefixes = ["10.", "172.16.", "172.17.", "172.18.", "172.19.", 
+                           "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+                           "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
+                           "172.30.", "172.31.", "192.168."]
+        return any(address_prefix.startswith(prefix) for prefix in private_prefixes)
+    
+    def _categorize_route(self, route, udr_analysis):
+        """Categorize routes based on their impact"""
+        impact = route.get("impact", {})
+        severity = impact.get("severity", "info")
+        next_hop_type = route.get("nextHopType", "")
+        address_prefix = route.get("addressPrefix", "")
+        
+        # Critical routes (high impact on connectivity)
+        if severity in ["critical", "high"]:
+            udr_analysis["criticalRoutes"].append({
+                "name": route.get("name", ""),
+                "addressPrefix": address_prefix,
+                "nextHopType": next_hop_type,
+                "impact": impact
+            })
+        
+        # Virtual appliance routes
+        if next_hop_type == "VirtualAppliance":
+            udr_analysis["virtualApplianceRoutes"].append({
+                "name": route.get("name", ""),
+                "addressPrefix": address_prefix,
+                "nextHopIpAddress": route.get("nextHopIpAddress", ""),
+                "impact": impact
+            })
+        
+        # Internet routes
+        if address_prefix == "0.0.0.0/0" or next_hop_type == "Internet":
+            udr_analysis["internetRoutes"].append({
+                "name": route.get("name", ""),
+                "addressPrefix": address_prefix,
+                "nextHopType": next_hop_type,
+                "impact": impact
+            })
     
     def analyze_vmss_configuration(self):
         """Analyze VMSS network configuration"""
@@ -633,32 +909,44 @@ EXAMPLES:
     
     def _get_api_server_fqdn(self):
         """Get the API server FQDN for testing"""
-        # Check if this is a private cluster
-        api_server_profile = self.cluster_info.get('apiServerAccessProfile', {})
-        is_private = api_server_profile.get('enablePrivateCluster', False)
-        
-        if is_private:
-            # For private clusters, prioritize private FQDN
+        try:
+            # Check if this is a private cluster
+            api_server_profile = self.cluster_info.get('apiServerAccessProfile', {})
+            if api_server_profile is None:
+                api_server_profile = {}
+            
+            is_private = api_server_profile.get('enablePrivateCluster', False)
+            
+            if is_private:
+                # For private clusters, prioritize private FQDN
+                private_fqdn = self.cluster_info.get('privateFqdn', '')
+                if private_fqdn:
+                    return f'https://{private_fqdn}'
+            
+            # For public clusters or fallback, use public FQDN
+            fqdn = self.cluster_info.get('fqdn', '')
+            if fqdn:
+                return f'https://{fqdn}'
+            
+            # Final fallback to private FQDN if public is not available
             private_fqdn = self.cluster_info.get('privateFqdn', '')
             if private_fqdn:
                 return f'https://{private_fqdn}'
-        
-        # For public clusters or fallback, use public FQDN
-        fqdn = self.cluster_info.get('fqdn', '')
-        if fqdn:
-            return f'https://{fqdn}'
-        
-        # Final fallback to private FQDN if public is not available
-        private_fqdn = self.cluster_info.get('privateFqdn', '')
-        if private_fqdn:
-            return f'https://{private_fqdn}'
-        
-        return None
+            
+            return None
+        except Exception as e:
+            self.logger.info(f"Error getting API server FQDN: {e}")
+            return None
     
     def _is_private_cluster(self):
         """Check if this is a private AKS cluster"""
-        api_server_profile = self.cluster_info.get('apiServerAccessProfile', {})
-        return api_server_profile.get('enablePrivateCluster', False)
+        try:
+            api_server_profile = self.cluster_info.get('apiServerAccessProfile', {})
+            if api_server_profile is None:
+                return False
+            return api_server_profile.get('enablePrivateCluster', False)
+        except Exception:
+            return False
     
     def _execute_vmss_test(self, vmss_info, test):
         """Execute a single connectivity test on VMSS instance"""
@@ -1017,6 +1305,9 @@ EXAMPLES:
         # Check VNet configuration issues
         self._analyze_vnet_issues(findings)
         
+        # Check UDR configuration issues
+        self._analyze_udr_issues(findings)
+        
         # Check connectivity test results (only if cluster is running)
         if not getattr(self, '_cluster_stopped', False):
             self._analyze_connectivity_test_results(findings)
@@ -1246,6 +1537,96 @@ EXAMPLES:
                 if network_profile.get('subnetId'):
                     # Could add subnet capacity analysis here
                     pass
+
+    def _analyze_udr_issues(self, findings):
+        """Analyze User Defined Route configuration issues"""
+        udr_analysis = self.outbound_analysis.get("udrAnalysis")
+        if not udr_analysis:
+            return
+        
+        # Check for critical routes that might break connectivity
+        critical_routes = udr_analysis.get("criticalRoutes", [])
+        for route in critical_routes:
+            impact = route.get("impact", {})
+            severity = impact.get("severity", "info")
+            
+            if severity == "critical":
+                findings.append({
+                    "severity": "critical",
+                    "code": "UDR_CRITICAL_ROUTE",
+                    "message": f"Critical UDR detected: {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) - {impact.get('description', '')}",
+                    "recommendation": "Review and modify the route table to ensure essential AKS traffic can reach its destinations. Consider using service tags or more specific routes."
+                })
+            elif severity == "high":
+                findings.append({
+                    "severity": "error",
+                    "code": "UDR_HIGH_IMPACT_ROUTE",
+                    "message": f"High-impact UDR detected: {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) - {impact.get('description', '')}",
+                    "recommendation": "Verify that the virtual appliance or next hop can properly handle this traffic and has appropriate rules configured."
+                })
+        
+        # Check for virtual appliance routes
+        va_routes = udr_analysis.get("virtualApplianceRoutes", [])
+        if va_routes:
+            # Check for default route through virtual appliance
+            default_va_routes = [r for r in va_routes if r.get('addressPrefix') == '0.0.0.0/0']
+            if default_va_routes:
+                outbound_type = self.outbound_analysis.get("type", "unknown")
+                findings.append({
+                    "severity": "warning",
+                    "code": "UDR_DEFAULT_ROUTE_VA",
+                    "message": f"Default route (0.0.0.0/0) redirects all internet traffic through virtual appliance at {default_va_routes[0].get('nextHopIpAddress', 'unknown IP')}. Outbound type is {outbound_type}.",
+                    "recommendation": "Ensure the virtual appliance is properly configured to handle AKS traffic including: container image pulls, Azure service connectivity, and API server access. Consider adding specific routes for AKS requirements."
+                })
+            
+            # Check for Azure service routes through virtual appliance
+            azure_va_routes = [r for r in va_routes if r.get('impact', {}).get('affectedTraffic', []) and 'azure_services' in r.get('impact', {}).get('affectedTraffic', [])]
+            if azure_va_routes:
+                route_names = [r.get('name', 'unnamed') for r in azure_va_routes]
+                findings.append({
+                    "severity": "warning",
+                    "code": "UDR_AZURE_SERVICES_VA",
+                    "message": f"Azure service traffic is routed through virtual appliance: {', '.join(route_names)}",
+                    "recommendation": "Verify the virtual appliance allows Azure service connectivity or add specific routes with nextHopType 'Internet' for required Azure services."
+                })
+            
+            # Check for container registry routes through virtual appliance
+            mcr_va_routes = [r for r in va_routes if r.get('impact', {}).get('affectedTraffic', []) and 'container_registry' in r.get('impact', {}).get('affectedTraffic', [])]
+            if mcr_va_routes:
+                route_names = [r.get('name', 'unnamed') for r in mcr_va_routes]
+                findings.append({
+                    "severity": "warning", 
+                    "code": "UDR_CONTAINER_REGISTRY_VA",
+                    "message": f"Container registry traffic is routed through virtual appliance: {', '.join(route_names)}",
+                    "recommendation": "Ensure the virtual appliance allows container registry access or add specific routes for Microsoft Container Registry (mcr.microsoft.com) endpoints."
+                })
+        
+        # Check for BGP route propagation issues
+        route_tables = udr_analysis.get("routeTables", [])
+        bgp_disabled_tables = [rt for rt in route_tables if rt.get('disableBgpRoutePropagation') == True]
+        if bgp_disabled_tables:
+            table_names = [rt.get('name', 'unnamed') for rt in bgp_disabled_tables]
+            findings.append({
+                "severity": "info",
+                "code": "UDR_BGP_PROPAGATION_DISABLED",
+                "message": f"BGP route propagation is disabled on route tables: {', '.join(table_names)}",
+                "recommendation": "Consider the impact on connectivity if you have ExpressRoute or VPN gateways that rely on BGP route propagation."
+            })
+        
+        # Summary finding for UDR analysis
+        if route_tables:
+            total_routes = sum(len(rt.get('routes', [])) for rt in route_tables)
+            va_route_count = len(va_routes)
+            critical_route_count = len(critical_routes)
+            
+            if total_routes > 0:
+                outbound_type = self.outbound_analysis.get("type", "unknown")
+                findings.append({
+                    "severity": "info",
+                    "code": "UDR_ANALYSIS_SUMMARY",
+                    "message": f"UDR Analysis: Found {len(route_tables)} route table(s) with {total_routes} total routes on node subnets. {va_route_count} routes use virtual appliances, {critical_route_count} have high impact on connectivity. Cluster uses {outbound_type} outbound type.",
+                    "recommendation": "Review the detailed UDR analysis in the JSON report for specific route impacts and recommendations."
+                })
     
     def _analyze_connectivity_test_results(self, findings):
         """Analyze connectivity test results and add findings"""
@@ -1327,7 +1708,11 @@ EXAMPLES:
                 "vnets": self.vnets_analysis,
                 "outbound": self.outbound_analysis,
                 "privateDns": self.private_dns_analysis,
-                "vmssConfiguration": self.vmss_analysis
+                "vmssConfiguration": self.vmss_analysis,
+                "routingAnalysis": {
+                    "outboundType": self.cluster_info.get('networkProfile', {}).get('outboundType', 'loadBalancer'),
+                    "udrAnalysis": self.outbound_analysis.get("udrAnalysis")
+                }
             },
             "diagnostics": {
                 "apiConnectivityProbe": self.api_probe_results,
@@ -1464,6 +1849,40 @@ EXAMPLES:
             for ip in self.outbound_ips:
                 print(f"  - {ip}")
             print()
+        
+        # UDR Analysis (if route tables found on node subnets)
+        udr_analysis = self.outbound_analysis.get("udrAnalysis")
+        if udr_analysis:
+            print("### User Defined Routes Analysis")
+            route_tables = udr_analysis.get("routeTables", [])
+            if route_tables:
+                print(f"- **Route Tables Found:** {len(route_tables)}")
+                
+                for rt in route_tables:
+                    print(f"- **Route Table:** {rt.get('name', 'unnamed')}")
+                    print(f"  - **Resource Group:** {rt.get('resourceGroup', '')}")
+                    print(f"  - **BGP Propagation:** {'Disabled' if rt.get('disableBgpRoutePropagation') else 'Enabled'}")
+                    print(f"  - **Routes:** {len(rt.get('routes', []))}")
+                    
+                    # Show critical routes
+                    critical_routes = [r for r in rt.get('routes', []) if r.get('impact', {}).get('severity') in ['critical', 'high']]
+                    if critical_routes:
+                        print(f"  - **Critical Routes:**")
+                        for route in critical_routes:
+                            impact = route.get('impact', {})
+                            print(f"    - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) → {route.get('nextHopType', '')} - {impact.get('description', '')}")
+                
+                # Show virtual appliance routes summary
+                va_routes = udr_analysis.get("virtualApplianceRoutes", [])
+                if va_routes:
+                    print(f"- **Virtual Appliance Routes:** {len(va_routes)}")
+                    for route in va_routes:
+                        print(f"  - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) → {route.get('nextHopIpAddress', '')}")
+                
+                print()
+            else:
+                print("- **No route tables found on node subnets**")
+                print()
         
         # Connectivity test results
         if hasattr(self, 'api_probe_results') and self.api_probe_results:
