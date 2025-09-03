@@ -1,6 +1,6 @@
 # AKS Network Diagnostics Tool
 
-A comprehensive Python script for analyzing Azure Kubernetes Service (AKS) cluster network configurations. Performs enterprise-grade analysis to diagnose networking issues, validate security configurations, and detect misconfigurations including User Defined Routes (UDRs), NAT Gateway setups, and API server access restrictions.
+A POC Python script for analyzing Azure Kubernetes Service (AKS) cluster network configurations. Performs analysis to diagnose networking issues, validate security configurations, and detect misconfigurations including User Defined Routes (UDRs), NAT Gateway setups, and API server access restrictions.
 
 ## 🚀 Quick Start
 
@@ -124,14 +124,14 @@ python3 aks-net-diagnostics.py -n cluster -g rg --subscription "12345678-1234-12
 
 **Outbound Configuration:**
 - NAT Gateway IPs:
-  - 4.205.231.240
+  - 4.205.231.XX
 
 **API Server Security:**
 - Authorized IP Ranges: 1 range(s)
-  - 45.65.190.28/32
+  - 100.65.190.XX/32
 
 **Findings Summary:**
-- ❌ Cluster outbound IPs (4.205.231.240) are not in authorized IP ranges
+- ❌ Cluster outbound IPs (4.205.231.XX) are not in authorized IP ranges
 - ⚠️ Very restrictive authorized IP range detected
 
 💡 Tip: Use --verbose flag for detailed analysis
@@ -196,8 +196,8 @@ python3 aks-net-diagnostics.py -n aks-managed-natgw-bicep -g aks-managed-natgw-b
 
 **Detects:**
 
-- ✅ NAT Gateway outbound IP: 4.205.231.240
-- ✅ Authorized IP range: 45.65.190.28/32
+- ✅ NAT Gateway outbound IP: 4.205.231.XX
+- ✅ Authorized IP range: 100.65.190.XX/32
 - ❌ **Critical**: Outbound IP not in authorized ranges (nodes cannot access API server)
 
 ### **Scenario 2: Standard Configuration**
@@ -209,7 +209,7 @@ python3 aks-net-diagnostics.py -n aks-overlay -g aks-overlay-rg
 
 **Detects:**
 
-- ✅ Load Balancer outbound IP: 130.107.45.124
+- ✅ Load Balancer outbound IP: 130.107.45.XX
 - ✅ No API server restrictions (unrestricted public access)
 - ℹ️ Consider enabling IP restrictions for enhanced security
 
@@ -222,7 +222,7 @@ python3 aks-net-diagnostics.py -n aks-slb-fw -g aks-slb-fw-rg --verbose
 
 **Detects:**
 
-- ⚠️ Load Balancer configured (130.107.205.36) but not effective
+- ⚠️ Load Balancer configured (130.107.205.XX) but not effective
 - ✅ Effective outbound via Virtual Appliance: 10.0.1.4
 - ❌ Default route (0.0.0.0/0) affects all traffic including container registry
 - ⚠️ UDR overrides configured outbound type
