@@ -1140,6 +1140,10 @@ EXAMPLES:
         if not authorized_ranges:
             return
         
+        # Get outbound type from cluster network profile
+        network_profile = self.cluster_info.get('networkProfile', {})
+        outbound_type = network_profile.get('outboundType', 'loadBalancer')
+        
         try:
             import ipaddress
             
@@ -1169,16 +1173,30 @@ EXAMPLES:
                     continue
             
             if unauthorized_outbound_ips:
-                implications.append(f"❌ Outbound IPs not in authorized ranges: {', '.join(unauthorized_outbound_ips)}")
-                implications.append("📝 Nodes may not be able to communicate with API server")
-                
-                # Add to security findings
-                self.api_server_access_analysis["securityFindings"].append({
-                    "severity": "critical",
-                    "issue": "Outbound IPs not authorized",
-                    "description": f"Cluster outbound IPs ({', '.join(unauthorized_outbound_ips)}) are not in authorized IP ranges",
-                    "recommendation": "Add cluster outbound IPs to authorized ranges or nodes cannot access the API server"
-                })
+                # Special handling for managedNATGateway outbound type
+                if outbound_type == 'managedNATGateway':
+                    implications.append(f"ℹ️ Outbound IPs not in authorized ranges: {', '.join(unauthorized_outbound_ips)}")
+                    implications.append("📝 Note: With managedNATGateway, nodes use internal Azure networking for API access")
+                    implications.append("📝 Authorized IP ranges primarily restrict external access, not internal node communication")
+                    
+                    # Add to security findings with informational severity for managedNATGateway
+                    self.api_server_access_analysis["securityFindings"].append({
+                        "severity": "info",
+                        "issue": "Outbound IPs not in authorized ranges (managedNATGateway)",
+                        "description": f"Cluster outbound IPs ({', '.join(unauthorized_outbound_ips)}) are not in authorized IP ranges. However, with managedNATGateway outbound type, nodes use internal Azure networking paths for API server communication that bypass these restrictions.",
+                        "recommendation": "Monitor actual connectivity with --probe-test. Consider adding NAT Gateway IPs to authorized ranges if external tools need to match node source IPs, but this is not required for cluster functionality."
+                    })
+                else:
+                    implications.append(f"❌ Outbound IPs not in authorized ranges: {', '.join(unauthorized_outbound_ips)}")
+                    implications.append("📝 Nodes may not be able to communicate with API server")
+                    
+                    # Add to security findings with critical severity for other outbound types
+                    self.api_server_access_analysis["securityFindings"].append({
+                        "severity": "critical",
+                        "issue": "Outbound IPs not authorized",
+                        "description": f"Cluster outbound IPs ({', '.join(unauthorized_outbound_ips)}) are not in authorized IP ranges",
+                        "recommendation": "Add cluster outbound IPs to authorized ranges or nodes cannot access the API server"
+                    })
             else:
                 implications.append("✅ All outbound IPs are in authorized ranges")
                 
@@ -2294,8 +2312,12 @@ EXAMPLES:
                 code = "API_UNRESTRICTED_ACCESS"
             elif "broad ip range" in issue.lower():
                 code = "API_BROAD_IP_RANGE" 
-            elif "outbound ips not authorized" in issue.lower():
-                code = "API_OUTBOUND_NOT_AUTHORIZED"
+            elif "outbound ips not" in issue.lower():
+                # Different codes for managedNATGateway vs other outbound types
+                if "managednatgateway" in issue.lower():
+                    code = "API_OUTBOUND_NATGW_INFO"
+                else:
+                    code = "API_OUTBOUND_NOT_AUTHORIZED"
             elif "invalid ip range" in issue.lower():
                 code = "API_INVALID_IP_RANGE"
             elif "redundant configuration" in issue.lower():
