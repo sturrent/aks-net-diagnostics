@@ -1172,32 +1172,41 @@ EXAMPLES:
                                     test_result['status'] = 'failed'
                                     test_result['error'] = "DNS resolved to public IP instead of private IP. Private DNS zone link may be missing or misconfigured."
                             else:
-                                # For all other tests, the exit code is the primary indicator of success
-                                # Only if exit code is 0 AND expected keywords are found, mark as passed
-                                if exit_code == 0:
-                                    if self._check_expected_output_combined(test, stdout, stderr, expected_keywords):
+                                # For HTTP connectivity tests, we need special handling for expected HTTP responses
+                                test_name = test.get('name', '').lower()
+                                if 'connectivity' in test_name and 'http' in test_name:
+                                    # For HTTP connectivity tests, check if we got a valid HTTP response
+                                    if self._is_successful_http_connection(stdout, stderr, exit_code):
                                         test_result['status'] = 'passed'
                                     else:
                                         test_result['status'] = 'failed'
-                                        test_result['error'] = f"Command succeeded but expected output not found. Keywords: {expected_keywords}"
-                                else:
-                                    # Exit code != 0 means the command failed
-                                    test_result['status'] = 'failed'
-                                    # Provide more specific error messages based on the test type
-                                    test_name = test.get('name', '').lower()
-                                    if 'connectivity' in test_name or 'http' in test_name:
-                                        if 'ssl' in stderr.lower() or 'tls' in stderr.lower():
-                                            test_result['error'] = f"HTTPS connection failed due to SSL/TLS error (exit code: {exit_code})"
-                                        elif 'timeout' in stderr.lower():
-                                            test_result['error'] = f"Connection timeout (exit code: {exit_code})"
-                                        elif 'refused' in stderr.lower():
-                                            test_result['error'] = f"Connection refused (exit code: {exit_code})"
+                                        # Provide specific error messages based on the failure type
+                                        if exit_code != 0:
+                                            if 'ssl' in stderr.lower() or 'tls' in stderr.lower():
+                                                test_result['error'] = f"HTTPS connection failed due to SSL/TLS error (exit code: {exit_code})"
+                                            elif 'timeout' in stderr.lower():
+                                                test_result['error'] = f"Connection timeout (exit code: {exit_code})"
+                                            elif 'refused' in stderr.lower():
+                                                test_result['error'] = f"Connection refused (exit code: {exit_code})"
+                                            else:
+                                                test_result['error'] = f"HTTP connectivity test failed (exit code: {exit_code})"
                                         else:
-                                            test_result['error'] = f"HTTP connectivity test failed (exit code: {exit_code})"
-                                    elif 'dns' in test_name:
-                                        test_result['error'] = f"DNS resolution failed (exit code: {exit_code})"
+                                            test_result['error'] = "HTTP connectivity test failed - no valid HTTP response detected"
+                                else:
+                                    # For non-HTTP tests (DNS, etc.), use the original logic
+                                    if exit_code == 0:
+                                        if self._check_expected_output_combined(test, stdout, stderr, expected_keywords):
+                                            test_result['status'] = 'passed'
+                                        else:
+                                            test_result['status'] = 'failed'
+                                            test_result['error'] = f"Command succeeded but expected output not found. Keywords: {expected_keywords}"
                                     else:
-                                        test_result['error'] = f"Command failed with exit code: {exit_code}"
+                                        # Exit code != 0 means the command failed
+                                        test_result['status'] = 'failed'
+                                        if 'dns' in test_name:
+                                            test_result['error'] = f"DNS resolution failed (exit code: {exit_code})"
+                                        else:
+                                            test_result['error'] = f"Command failed with exit code: {exit_code}"
                         else:
                             test_result['status'] = 'failed'
                             test_result['error'] = f"VMSS command failed: {first_result.get('displayStatus', 'Unknown error')}"
@@ -1244,6 +1253,75 @@ EXAMPLES:
             stdout = message
             
         return stdout, stderr, exit_code
+    
+    def _is_successful_http_connection(self, stdout, stderr, exit_code):
+        """Check if an HTTP connectivity test was successful"""
+        # Combine stdout and stderr for analysis since curl -v outputs to both
+        combined_output = f"{stdout}\n{stderr}".lower()
+        
+        # Check for successful connection indicators
+        connection_indicators = [
+            'connected to',           # TCP connection established
+            'http/1.1',              # HTTP/1.1 response
+            'http/2',                # HTTP/2 response  
+            'http/1.0'               # HTTP/1.0 response
+        ]
+        
+        # Check if we successfully connected and got an HTTP response
+        has_connection = any(indicator in combined_output for indicator in connection_indicators)
+        
+        if has_connection:
+            # For specific services, certain HTTP status codes are expected and should be considered success
+            
+            # Microsoft Container Registry: 400 responses are normal for GET requests without parameters
+            if 'mcr.microsoft.com' in combined_output:
+                if any(status in combined_output for status in ['http/2 400', 'http/1.1 400', '400 bad request']):
+                    return True  # MCR returns 400 for unauthorized/invalid requests, but connection is successful
+            
+            # Azure Management API: Various responses are acceptable
+            if 'management.azure.com' in combined_output:
+                # 200, 401, 403 are all valid responses indicating successful connectivity
+                if any(status in combined_output for status in ['http/2 200', 'http/2 401', 'http/2 403', 
+                                                                'http/1.1 200', 'http/1.1 401', 'http/1.1 403']):
+                    return True
+            
+            # For AKS API server, 401/403 responses are normal without authentication
+            if any(api_indicator in combined_output for api_indicator in ['azmk8s.io', 'hcp.']):
+                if any(status in combined_output for status in ['http/2 401', 'http/2 403', 'http/1.1 401', 'http/1.1 403']):
+                    return True
+            
+            # Generic success: any HTTP response indicates successful connectivity
+            # Even error responses (4xx, 5xx) mean we connected successfully
+            http_response_patterns = [
+                'http/1.1 ', 'http/2 ', 'http/1.0 ',  # Any HTTP response
+                'content-length:', 'content-type:',    # Response headers
+                'x-ms-', 'server:'                     # Common response headers
+            ]
+            
+            if any(pattern in combined_output for pattern in http_response_patterns):
+                return True
+        
+        # Check for clear failure indicators
+        failure_indicators = [
+            'connection refused',
+            'connection timed out', 
+            'could not resolve host',
+            'network is unreachable',
+            'ssl connect error',
+            'certificate verify failed'
+        ]
+        
+        has_failure = any(indicator in combined_output for indicator in failure_indicators)
+        
+        # If we have connection indicators but no clear failures, consider it success
+        if has_connection and not has_failure:
+            return True
+        
+        # If exit code is 0 and we have connection indicators, it's likely successful
+        if exit_code == 0 and has_connection:
+            return True
+        
+        return False
     
     def _check_expected_output(self, output, expected_keywords):
         """Check if output contains expected keywords"""
