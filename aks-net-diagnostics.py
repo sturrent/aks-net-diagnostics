@@ -276,11 +276,113 @@ EXAMPLES:
         self.logger.info("  - Checking for UDRs on node subnets...")
         udr_analysis = self._analyze_node_subnet_udrs()
         
+        # Determine effective outbound configuration and warn about conflicts
+        effective_outbound_summary = self._determine_effective_outbound(outbound_type, udr_analysis)
+        
         self.outbound_analysis = {
             "type": outbound_type,
-            "effectivePublicIPs": self.outbound_ips,
+            "configuredPublicIPs": self.outbound_ips,  # IPs configured in load balancer
+            "effectiveOutbound": effective_outbound_summary,
             "udrAnalysis": udr_analysis if udr_analysis.get("routeTables") else None
         }
+        
+        # Display summary of effective outbound configuration
+        self._display_outbound_summary(effective_outbound_summary)
+    
+    def _determine_effective_outbound(self, outbound_type, udr_analysis):
+        """Determine the effective outbound configuration considering UDRs"""
+        effective_summary = {
+            "mechanism": outbound_type,
+            "overridden_by_udr": False,
+            "effective_mechanism": outbound_type,
+            "virtual_appliance_ips": [],
+            "load_balancer_ips": self.outbound_ips.copy(),
+            "warnings": [],
+            "description": ""
+        }
+        
+        # Check if UDRs override the configured outbound type
+        virtual_appliance_routes = udr_analysis.get("virtualApplianceRoutes", [])
+        internet_routes = udr_analysis.get("internetRoutes", [])
+        
+        # Look for default routes (0.0.0.0/0) that redirect traffic
+        default_route_to_appliance = None
+        for route in virtual_appliance_routes:
+            if route.get("addressPrefix") == "0.0.0.0/0":
+                default_route_to_appliance = route
+                break
+        
+        if default_route_to_appliance:
+            # UDR overrides the configured outbound mechanism
+            effective_summary["overridden_by_udr"] = True
+            effective_summary["effective_mechanism"] = "virtualAppliance"
+            appliance_ip = default_route_to_appliance.get("nextHopIpAddress", "unknown")
+            effective_summary["virtual_appliance_ips"] = [appliance_ip]
+            
+            if outbound_type == "loadBalancer":
+                effective_summary["warnings"].append({
+                    "level": "warning",
+                    "message": f"Load Balancer outbound configuration detected but UDR forces traffic to virtual appliance ({appliance_ip})",
+                    "impact": "The Load Balancer public IPs are not the effective outbound IPs"
+                })
+                effective_summary["description"] = f"Traffic is routed through virtual appliance {appliance_ip} via UDR (overriding Load Balancer)"
+            else:
+                effective_summary["description"] = f"Traffic is routed through virtual appliance {appliance_ip} via UDR"
+        else:
+            # No UDR override, use configured mechanism
+            if outbound_type == "loadBalancer":
+                if self.outbound_ips:
+                    effective_summary["description"] = f"Traffic uses Load Balancer with public IP(s): {', '.join(self.outbound_ips)}"
+                else:
+                    effective_summary["warnings"].append({
+                        "level": "error",
+                        "message": "Load Balancer outbound type configured but no public IPs found",
+                        "impact": "Outbound connectivity may be broken"
+                    })
+                    effective_summary["description"] = "Load Balancer outbound configured but no public IPs detected"
+            elif outbound_type == "userDefinedRouting":
+                if virtual_appliance_routes:
+                    # Collect all virtual appliance IPs from routes
+                    appliance_ips = list(set([r.get("nextHopIpAddress", "unknown") for r in virtual_appliance_routes if r.get("nextHopIpAddress")]))
+                    effective_summary["virtual_appliance_ips"] = appliance_ips
+                    effective_summary["description"] = f"User Defined Routing through virtual appliance(s): {', '.join(appliance_ips)}"
+                else:
+                    effective_summary["warnings"].append({
+                        "level": "warning",
+                        "message": "User Defined Routing configured but no virtual appliance routes found",
+                        "impact": "May indicate misconfigured routing"
+                    })
+                    effective_summary["description"] = "User Defined Routing configured"
+            elif outbound_type == "managedNATGateway":
+                effective_summary["description"] = "Managed NAT Gateway (analysis not yet implemented)"
+        
+        return effective_summary
+    
+    def _display_outbound_summary(self, effective_summary):
+        """Display a summary of the effective outbound configuration"""
+        mechanism = effective_summary["effective_mechanism"]
+        description = effective_summary["description"]
+        
+        if effective_summary["overridden_by_udr"]:
+            self.logger.info(f"  ⚠️  {description}")
+            if effective_summary["load_balancer_ips"]:
+                self.logger.info(f"    Load Balancer IPs (not effective): {', '.join(effective_summary['load_balancer_ips'])}")
+        else:
+            if mechanism == "loadBalancer" and effective_summary["load_balancer_ips"]:
+                for ip in effective_summary["load_balancer_ips"]:
+                    self.logger.info(f"    Found outbound IP: {ip}")
+            elif mechanism == "virtualAppliance" and effective_summary["virtual_appliance_ips"]:
+                for ip in effective_summary["virtual_appliance_ips"]:
+                    self.logger.info(f"    Virtual appliance IP: {ip}")
+        
+        # Display warnings
+        for warning in effective_summary.get("warnings", []):
+            level = warning["level"]
+            message = warning["message"]
+            if level == "error":
+                self.logger.info(f"    ❌ {message}")
+            else:
+                self.logger.info(f"    ⚠️  {message}")
     
     def _analyze_load_balancer_outbound(self):
         """Analyze load balancer outbound configuration"""
@@ -355,11 +457,8 @@ EXAMPLES:
                                 if ip_address not in self.outbound_ips:
                                     self.outbound_ips.append(ip_address)
         
-        # Only show the final summary of discovered outbound IPs
-        if self.outbound_ips:
-            for ip in self.outbound_ips:
-                self.logger.info(f"    Found outbound IP: {ip}")
-        else:
+        # Summary of outbound IP discovery will be handled by _display_outbound_summary
+        if self.verbose and not self.outbound_ips:
             self.logger.info("    No outbound IPs detected")
     
     def _analyze_udr_outbound(self):
@@ -1932,11 +2031,37 @@ EXAMPLES:
         is_private = api_server_profile.get('enablePrivateCluster', False) if api_server_profile else False
         print(f"- Private Cluster: {str(is_private).lower()}")
         
-        if self.outbound_ips:
+        if self.outbound_ips or (self.outbound_analysis and self.outbound_analysis.get('effectiveOutbound')):
             print()
-            print("**Outbound IPs:**")
-            for ip in self.outbound_ips:
-                print(f"- {ip}")
+            print("**Outbound Configuration:**")
+            
+            effective_outbound = self.outbound_analysis.get('effectiveOutbound', {}) if self.outbound_analysis else {}
+            
+            if effective_outbound.get('overridden_by_udr'):
+                # UDR overrides the load balancer
+                print("- Configured Load Balancer IPs (not effective):")
+                for ip in self.outbound_ips:
+                    print(f"  - {ip}")
+                print("- Effective Outbound (via UDR):")
+                for ip in effective_outbound.get('virtual_appliance_ips', []):
+                    print(f"  - Virtual Appliance: {ip}")
+            else:
+                # No UDR override, show based on configured mechanism
+                outbound_type = self.outbound_analysis.get('type', 'loadBalancer') if self.outbound_analysis else 'loadBalancer'
+                
+                if outbound_type == 'loadBalancer' and self.outbound_ips:
+                    print("- Load Balancer IPs:")
+                    for ip in self.outbound_ips:
+                        print(f"  - {ip}")
+                elif outbound_type == 'userDefinedRouting' and effective_outbound.get('virtual_appliance_ips'):
+                    print("- Virtual Appliance IPs:")
+                    for ip in effective_outbound.get('virtual_appliance_ips', []):
+                        print(f"  - {ip}")
+                elif self.outbound_ips:
+                    # Fallback to showing configured IPs
+                    print("- Outbound IPs:")
+                    for ip in self.outbound_ips:
+                        print(f"  - {ip}")
         
         print()
         print("**Findings Summary:**")
