@@ -41,6 +41,7 @@ class AKSNetworkDiagnostics:
         self.private_dns_analysis: Dict[str, Any] = {}
         self.api_server_access_analysis: Dict[str, Any] = {}
         self.vmss_analysis: List[Dict[str, Any]] = []
+        self.nsg_analysis: Dict[str, Any] = {}
         self.api_probe_results: Optional[Dict[str, Any]] = None
         self.failure_analysis: Dict[str, Any] = {"enabled": False}
         self.findings: List[Dict[str, Any]] = []
@@ -913,6 +914,269 @@ EXAMPLES:
                     "resourceGroup": mc_rg,
                     "networkProfile": network_profile
                 })
+    
+    def analyze_nsg_configuration(self):
+        """Analyze Network Security Group configuration for AKS nodes"""
+        self.logger.info("Analyzing NSG configuration...")
+        
+        self.nsg_analysis = {
+            "subnetNsgs": [],
+            "nicNsgs": [], 
+            "requiredRules": [],
+            "missingRules": [],
+            "blockingRules": [],
+            "interNodeCommunication": {"status": "unknown", "issues": []}
+        }
+        
+        # Determine if cluster is private
+        api_server_profile = self.cluster_info.get('apiServerAccessProfile')
+        is_private_cluster = False
+        if api_server_profile:
+            is_private_cluster = api_server_profile.get('enablePrivateCluster', False)
+        
+        # Get required outbound rules based on cluster type
+        required_rules = self._get_required_aks_rules(is_private_cluster)
+        self.nsg_analysis["requiredRules"] = required_rules
+        
+        # Analyze NSGs on node subnets
+        self._analyze_subnet_nsgs()
+        
+        # Analyze NSGs on node NICs
+        self._analyze_nic_nsgs()
+        
+        # Check for inter-node communication issues
+        self._analyze_inter_node_communication()
+        
+        # Check for rule conflicts and missing rules
+        self._analyze_nsg_compliance()
+    
+    def _get_required_aks_rules(self, is_private_cluster):
+        """Get required NSG rules for AKS based on cluster type"""
+        rules = {
+            "outbound": [
+                {
+                    "name": "AKS_Registry_Access",
+                    "protocol": "TCP",
+                    "destination": "MicrosoftContainerRegistry",
+                    "ports": ["443"],
+                    "description": "Access to Microsoft Container Registry"
+                },
+                {
+                    "name": "AKS_Azure_Management", 
+                    "protocol": "TCP",
+                    "destination": "AzureCloud",
+                    "ports": ["443"],
+                    "description": "Azure management endpoints"
+                },
+                {
+                    "name": "AKS_DNS",
+                    "protocol": "UDP", 
+                    "destination": "*",
+                    "ports": ["53"],
+                    "description": "DNS resolution"
+                },
+                {
+                    "name": "AKS_NTP",
+                    "protocol": "UDP",
+                    "destination": "*", 
+                    "ports": ["123"],
+                    "description": "Network Time Protocol"
+                }
+            ],
+            "inbound": [
+                {
+                    "name": "AKS_Inter_Node_Communication",
+                    "protocol": "*",
+                    "source": "VirtualNetwork",
+                    "ports": ["*"],
+                    "description": "Communication between cluster nodes"
+                }
+            ]
+        }
+        
+        if not is_private_cluster:
+            # Public clusters need API server access
+            rules["outbound"].append({
+                "name": "AKS_API_Server_Access",
+                "protocol": "TCP",
+                "destination": "*",
+                "ports": ["443"],
+                "description": "Access to AKS API server"
+            })
+        
+        # Add Azure Load Balancer access
+        rules["inbound"].append({
+            "name": "AKS_Load_Balancer",
+            "protocol": "*",
+            "source": "AzureLoadBalancer",
+            "ports": ["*"],
+            "description": "Azure Load Balancer health probes"
+        })
+        
+        return rules
+    
+    def _analyze_subnet_nsgs(self):
+        """Analyze NSGs associated with node subnets"""
+        processed_subnets = set()  # Track processed subnets to avoid duplicates
+        
+        for vmss in self.vmss_analysis:
+            vmss_name = vmss.get("name", "unknown")
+            network_profile = vmss.get("networkProfile", {})
+            network_interfaces = network_profile.get("networkInterfaceConfigurations", [])
+            
+            for nic in network_interfaces:
+                ip_configs = nic.get('ipConfigurations', [])
+                for ip_config in ip_configs:
+                    subnet = ip_config.get('subnet', {})
+                    subnet_id = subnet.get('id')
+                    
+                    if not subnet_id or subnet_id in processed_subnets:
+                        continue
+                    
+                    processed_subnets.add(subnet_id)
+                    
+                    # Get subnet information
+                    subnet_cmd = ['network', 'vnet', 'subnet', 'show', '--ids', subnet_id, '-o', 'json']
+                    subnet_info = self.run_azure_cli(subnet_cmd)
+                    
+                    if not subnet_info or not isinstance(subnet_info, dict):
+                        continue
+                        
+                    nsg_info = subnet_info.get('networkSecurityGroup')
+                    if nsg_info:
+                        nsg_id = nsg_info.get('id')
+                        nsg_name = nsg_id.split('/')[-1] if nsg_id else 'unknown'
+                        
+                        # Get NSG details
+                        nsg_cmd = ['network', 'nsg', 'show', '--ids', nsg_id, '-o', 'json']
+                        nsg_details = self.run_azure_cli(nsg_cmd)
+                        
+                        if nsg_details and isinstance(nsg_details, dict):
+                            self.nsg_analysis["subnetNsgs"].append({
+                                "subnetId": subnet_id,
+                                "subnetName": subnet_info.get('name', 'unknown'),
+                                "nsgId": nsg_id,
+                                "nsgName": nsg_name,
+                                "rules": nsg_details.get('securityRules', []),
+                                "defaultRules": nsg_details.get('defaultSecurityRules', [])
+                            })
+                            
+                            if self.verbose:
+                                self.logger.info(f"  Found NSG on subnet {subnet_info.get('name')}: {nsg_name}")
+                    else:
+                        if self.verbose:
+                            self.logger.info(f"  No NSG found on subnet {subnet_info.get('name')}")
+    
+    def _analyze_nic_nsgs(self):
+        """Analyze NSGs associated with node NICs"""
+        for vmss in self.vmss_analysis:
+            vmss_name = vmss.get("name")
+            if not vmss_name:
+                continue
+                
+            network_profile = vmss.get("networkProfile", {})
+            network_interfaces = network_profile.get('networkInterfaceConfigurations', [])
+            
+            for nic_config in network_interfaces:
+                # Check for NSG on NIC configuration
+                nsg_info = nic_config.get('networkSecurityGroup')
+                if nsg_info:
+                    nsg_id = nsg_info.get('id')
+                    nsg_name = nsg_id.split('/')[-1] if nsg_id else 'unknown'
+                    
+                    # Get NSG details
+                    nsg_cmd = ['network', 'nsg', 'show', '--ids', nsg_id, '-o', 'json']
+                    nsg_details = self.run_azure_cli(nsg_cmd)
+                    
+                    if nsg_details and isinstance(nsg_details, dict):
+                        self.nsg_analysis["nicNsgs"].append({
+                            "vmssName": vmss_name,
+                            "nicName": nic_config.get('name', 'unknown'),
+                            "nsgId": nsg_id,
+                            "nsgName": nsg_name,
+                            "rules": nsg_details.get('securityRules', []),
+                            "defaultRules": nsg_details.get('defaultSecurityRules', [])
+                        })
+                        
+                        if self.verbose:
+                            self.logger.info(f"  Found NSG on VMSS {vmss_name} NIC: {nsg_name}")
+                else:
+                    if self.verbose:
+                        self.logger.info(f"  No NSG found on VMSS {vmss_name} NIC")
+    
+    def _analyze_inter_node_communication(self):
+        """Analyze if NSG rules could block inter-node communication"""
+        all_nsgs = self.nsg_analysis["subnetNsgs"] + self.nsg_analysis["nicNsgs"]
+        issues = []
+        
+        for nsg in all_nsgs:
+            # Check for rules that might block VirtualNetwork traffic
+            blocking_rules = []
+            all_rules = nsg.get("rules", []) + nsg.get("defaultRules", [])
+            
+            for rule in all_rules:
+                if (rule.get('access', '').lower() == 'deny' and 
+                    rule.get('direction', '').lower() == 'inbound' and
+                    rule.get('priority', 0) < 65000):
+                    
+                    source = rule.get('sourceAddressPrefix', '')
+                    if source in ['*', 'VirtualNetwork'] or source.startswith('10.') or source.startswith('192.168.') or source.startswith('172.'):
+                        blocking_rules.append({
+                            "ruleName": rule.get('name', 'unknown'),
+                            "priority": rule.get('priority', 0),
+                            "source": source,
+                            "destination": rule.get('destinationAddressPrefix', ''),
+                            "protocol": rule.get('protocol', ''),
+                            "ports": rule.get('destinationPortRange', '')
+                        })
+            
+            if blocking_rules:
+                issues.append({
+                    "nsgName": nsg.get("nsgName"),
+                    "location": "subnet" if "subnetId" in nsg else "nic",
+                    "blockingRules": blocking_rules
+                })
+        
+        self.nsg_analysis["interNodeCommunication"] = {
+            "status": "potential_issues" if issues else "ok",
+            "issues": issues
+        }
+    
+    def _analyze_nsg_compliance(self):
+        """Analyze NSG compliance with AKS requirements"""
+        all_nsgs = self.nsg_analysis["subnetNsgs"] + self.nsg_analysis["nicNsgs"]
+        missing_rules = []
+        blocking_rules = []
+        
+        for nsg in all_nsgs:
+            nsg_name = nsg.get("nsgName", "unknown")
+            all_rules = nsg.get("rules", []) + nsg.get("defaultRules", [])
+            
+            # Check for rules that might block required AKS traffic
+            for rule in all_rules:
+                if rule.get('access', '').lower() == 'deny' and rule.get('priority', 0) < 65000:
+                    # Check if this rule could block required AKS outbound traffic
+                    if rule.get('direction', '').lower() == 'outbound':
+                        dest = rule.get('destinationAddressPrefix', '')
+                        ports = rule.get('destinationPortRange', '')
+                        protocol = rule.get('protocol', '')
+                        
+                        # Check for rules that could block essential AKS traffic
+                        if (dest in ['*', 'Internet'] or 'MicrosoftContainerRegistry' in str(dest) or 'AzureCloud' in str(dest)):
+                            if ('443' in str(ports) or '*' in str(ports)) and protocol.upper() in ['TCP', '*']:
+                                blocking_rules.append({
+                                    "nsgName": nsg_name,
+                                    "ruleName": rule.get('name', 'unknown'),
+                                    "priority": rule.get('priority', 0),
+                                    "direction": rule.get('direction', ''),
+                                    "protocol": protocol,
+                                    "destination": dest,
+                                    "ports": ports,
+                                    "impact": "Could block AKS management traffic"
+                                })
+        
+        self.nsg_analysis["blockingRules"] = blocking_rules
+        self.nsg_analysis["missingRules"] = missing_rules
     
     def analyze_private_dns(self):
         """Analyze private DNS configuration"""
@@ -1973,6 +2237,9 @@ EXAMPLES:
         # Check API server access configuration issues
         self._analyze_api_server_access_issues(findings)
         
+        # Check NSG configuration issues
+        self._analyze_nsg_issues(findings)
+        
         # Check connectivity test results (only if cluster is running)
         if not getattr(self, '_cluster_stopped', False):
             self._analyze_connectivity_test_results(findings)
@@ -2211,60 +2478,78 @@ EXAMPLES:
         
         # Check for critical routes that might break connectivity
         critical_routes = udr_analysis.get("criticalRoutes", [])
+        va_routes = udr_analysis.get("virtualApplianceRoutes", [])
+        default_va_routes = [r for r in va_routes if r.get('addressPrefix') == '0.0.0.0/0']
+        
         for route in critical_routes:
             impact = route.get("impact", {})
             severity = impact.get("severity", "info")
+            route_prefix = route.get('addressPrefix', '')
+            
+            # Skip high-impact findings for default routes if we have a specific default route VA finding
+            if severity == "high" and route_prefix == '0.0.0.0/0' and default_va_routes:
+                continue
             
             if severity == "critical":
                 findings.append({
                     "severity": "critical",
                     "code": "UDR_CRITICAL_ROUTE",
-                    "message": f"Critical UDR detected: {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) - {impact.get('description', '')}",
+                    "message": f"Critical UDR detected: {route.get('name', 'unnamed')} ({route_prefix}) - {impact.get('description', '')}",
                     "recommendation": "Review and modify the route table to ensure essential AKS traffic can reach its destinations. Consider using service tags or more specific routes."
                 })
             elif severity == "high":
                 findings.append({
                     "severity": "error",
                     "code": "UDR_HIGH_IMPACT_ROUTE",
-                    "message": f"High-impact UDR detected: {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) - {impact.get('description', '')}",
+                    "message": f"High-impact UDR detected: {route.get('name', 'unnamed')} ({route_prefix}) - {impact.get('description', '')}",
                     "recommendation": "Verify that the virtual appliance or next hop can properly handle this traffic and has appropriate rules configured."
                 })
         
         # Check for virtual appliance routes
-        va_routes = udr_analysis.get("virtualApplianceRoutes", [])
         if va_routes:
             # Check for default route through virtual appliance
-            default_va_routes = [r for r in va_routes if r.get('addressPrefix') == '0.0.0.0/0']
             if default_va_routes:
                 outbound_type = self.outbound_analysis.get("type", "unknown")
+                # Build comprehensive message for default route including all affected traffic
+                affected_services = []
+                if any('azure_services' in r.get('impact', {}).get('affectedTraffic', []) for r in default_va_routes):
+                    affected_services.append("Azure services")
+                if any('container_registry' in r.get('impact', {}).get('affectedTraffic', []) for r in default_va_routes):
+                    affected_services.append("container registries")
+                
+                base_message = f"Default route (0.0.0.0/0) redirects all internet traffic through virtual appliance at {default_va_routes[0].get('nextHopIpAddress', 'unknown IP')}. Outbound type is {outbound_type}."
+                if affected_services:
+                    base_message += f" This affects: {', '.join(affected_services)}."
+                
                 findings.append({
                     "severity": "warning",
                     "code": "UDR_DEFAULT_ROUTE_VA",
-                    "message": f"Default route (0.0.0.0/0) redirects all internet traffic through virtual appliance at {default_va_routes[0].get('nextHopIpAddress', 'unknown IP')}. Outbound type is {outbound_type}.",
+                    "message": base_message,
                     "recommendation": "Ensure the virtual appliance is properly configured to handle AKS traffic including: container image pulls, Azure service connectivity, and API server access. Consider adding specific routes for AKS requirements."
                 })
-            
-            # Check for Azure service routes through virtual appliance
-            azure_va_routes = [r for r in va_routes if r.get('impact', {}).get('affectedTraffic', []) and 'azure_services' in r.get('impact', {}).get('affectedTraffic', [])]
-            if azure_va_routes:
-                route_names = [r.get('name', 'unnamed') for r in azure_va_routes]
-                findings.append({
-                    "severity": "warning",
-                    "code": "UDR_AZURE_SERVICES_VA",
-                    "message": f"Azure service traffic is routed through virtual appliance: {', '.join(route_names)}",
-                    "recommendation": "Verify the virtual appliance allows Azure service connectivity or add specific routes with nextHopType 'Internet' for required Azure services."
-                })
-            
-            # Check for container registry routes through virtual appliance
-            mcr_va_routes = [r for r in va_routes if r.get('impact', {}).get('affectedTraffic', []) and 'container_registry' in r.get('impact', {}).get('affectedTraffic', [])]
-            if mcr_va_routes:
-                route_names = [r.get('name', 'unnamed') for r in mcr_va_routes]
-                findings.append({
-                    "severity": "warning", 
-                    "code": "UDR_CONTAINER_REGISTRY_VA",
-                    "message": f"Container registry traffic is routed through virtual appliance: {', '.join(route_names)}",
-                    "recommendation": "Ensure the virtual appliance allows container registry access or add specific routes for Microsoft Container Registry (mcr.microsoft.com) endpoints."
-                })
+            else:
+                # Only add specific service findings if there's no default route
+                # Check for Azure service routes through virtual appliance
+                azure_va_routes = [r for r in va_routes if r.get('impact', {}).get('affectedTraffic', []) and 'azure_services' in r.get('impact', {}).get('affectedTraffic', [])]
+                if azure_va_routes:
+                    route_names = [r.get('name', 'unnamed') for r in azure_va_routes]
+                    findings.append({
+                        "severity": "warning",
+                        "code": "UDR_AZURE_SERVICES_VA",
+                        "message": f"Azure service traffic is routed through virtual appliance: {', '.join(route_names)}",
+                        "recommendation": "Verify the virtual appliance allows Azure service connectivity or add specific routes with nextHopType 'Internet' for required Azure services."
+                    })
+                
+                # Check for container registry routes through virtual appliance
+                mcr_va_routes = [r for r in va_routes if r.get('impact', {}).get('affectedTraffic', []) and 'container_registry' in r.get('impact', {}).get('affectedTraffic', [])]
+                if mcr_va_routes:
+                    route_names = [r.get('name', 'unnamed') for r in mcr_va_routes]
+                    findings.append({
+                        "severity": "warning", 
+                        "code": "UDR_CONTAINER_REGISTRY_VA",
+                        "message": f"Container registry traffic is routed through virtual appliance: {', '.join(route_names)}",
+                        "recommendation": "Ensure the virtual appliance allows container registry access or add specific routes for Microsoft Container Registry (mcr.microsoft.com) endpoints."
+                    })
         
         # Check for BGP route propagation issues
         route_tables = udr_analysis.get("routeTables", [])
@@ -2360,6 +2645,48 @@ EXAMPLES:
                 "recommendation": "Verify that all necessary IP ranges are included and review ranges periodically"
             })
     
+    def _analyze_nsg_issues(self, findings):
+        """Analyze NSG configuration issues"""
+        if not hasattr(self, 'nsg_analysis') or not self.nsg_analysis:
+            return
+        
+        # Check for blocking rules that could affect AKS functionality
+        blocking_rules = self.nsg_analysis.get("blockingRules", [])
+        for rule in blocking_rules:
+            findings.append({
+                "severity": "critical",
+                "code": "NSG_BLOCKING_AKS_TRAFFIC",
+                "message": f"NSG rule '{rule.get('ruleName')}' in '{rule.get('nsgName')}' may block AKS traffic",
+                "recommendation": f"Review NSG rule priority {rule.get('priority')} - {rule.get('impact', 'Could affect cluster functionality')}"
+            })
+        
+        # Check for inter-node communication issues
+        inter_node = self.nsg_analysis.get("interNodeCommunication", {})
+        if inter_node.get("status") == "potential_issues":
+            for issue in inter_node.get("issues", []):
+                nsg_name = issue.get("nsgName", "unknown")
+                location = issue.get("location", "unknown")
+                rule_count = len(issue.get("blockingRules", []))
+                
+                findings.append({
+                    "severity": "warning",
+                    "code": "NSG_INTER_NODE_BLOCKING",
+                    "message": f"NSG '{nsg_name}' on {location} has {rule_count} rule(s) that may block inter-node communication",
+                    "recommendation": "Ensure VirtualNetwork traffic is allowed between cluster nodes for proper functionality"
+                })
+        
+        # Check NSG coverage - only report when no NSGs are found (security recommendation)
+        subnet_nsgs = self.nsg_analysis.get("subnetNsgs", [])
+        nic_nsgs = self.nsg_analysis.get("nicNsgs", [])
+        
+        if not subnet_nsgs and not nic_nsgs:
+            findings.append({
+                "severity": "info",
+                "code": "NSG_NO_RESTRICTIONS", 
+                "message": "No NSGs found on cluster node subnets or NICs",
+                "recommendation": "Consider implementing NSGs for enhanced network security while ensuring AKS traffic is allowed"
+            })
+    
     def _analyze_connectivity_test_results(self, findings):
         """Analyze connectivity test results and add findings"""
         if not hasattr(self, 'api_probe_results') or not self.api_probe_results:
@@ -2442,6 +2769,7 @@ EXAMPLES:
                 "privateDns": self.private_dns_analysis,
                 "apiServerAccess": self.api_server_access_analysis,
                 "vmssConfiguration": self.vmss_analysis,
+                "nsgConfiguration": self.nsg_analysis,
                 "routingAnalysis": {
                     "outboundType": self.cluster_info.get('networkProfile', {}).get('outboundType', 'loadBalancer'),
                     "udrAnalysis": self.outbound_analysis.get("udrAnalysis")
@@ -2745,6 +3073,118 @@ EXAMPLES:
                                     print(f"    ```")
                 print()
         
+        # NSG Analysis Results
+        if hasattr(self, 'nsg_analysis') and self.nsg_analysis:
+            print("### Network Security Group (NSG) Analysis")
+            
+            # NSG Analysis Summary
+            subnet_nsgs = self.nsg_analysis.get('subnetNsgs', [])
+            nic_nsgs = self.nsg_analysis.get('nicNsgs', [])
+            total_nsgs = len(subnet_nsgs) + len(nic_nsgs)
+            blocking_rules = self.nsg_analysis.get('blockingRules', [])
+            inter_node_status = self.nsg_analysis.get('interNodeCommunication', {}).get('status', 'unknown')
+            
+            print(f"- **NSGs Analyzed:** {total_nsgs}")
+            print(f"- **Issues Found:** {len(blocking_rules)}")
+            
+            # Inter-node communication status
+            status_icon = {
+                'ok': '✅',
+                'potential_issues': '⚠️',
+                'blocked': '❌',
+                'unknown': '❓'
+            }.get(inter_node_status, '❓')
+            print(f"- **Inter-node Communication:** {status_icon} {inter_node_status.replace('_', ' ').title()}")
+            
+            # Show detailed NSG information in verbose mode
+            if self.verbose and total_nsgs > 0:
+                print()
+                
+                # Subnet NSGs
+                if subnet_nsgs:
+                    print("**Subnet NSGs:**")
+                    for nsg in subnet_nsgs:
+                        nsg_name = nsg.get('nsgName', 'unknown')
+                        subnet_name = nsg.get('subnetName', 'unknown')
+                        custom_rules = len(nsg.get('rules', []))
+                        default_rules = len(nsg.get('defaultRules', []))
+                        
+                        print(f"- **{subnet_name}** → NSG: {nsg_name}")
+                        print(f"  - Custom Rules: {custom_rules}, Default Rules: {default_rules}")
+                        
+                        # Show custom rules
+                        if custom_rules > 0 and nsg.get('rules'):
+                            print(f"  - **Custom Rules:**")
+                            for rule in nsg.get('rules', []):
+                                access = rule.get('access', 'Unknown')
+                                direction = rule.get('direction', 'Unknown')
+                                priority = rule.get('priority', 'Unknown')
+                                protocol = rule.get('protocol', 'Unknown')
+                                dest = rule.get('destinationAddressPrefix', 'Unknown')
+                                ports = rule.get('destinationPortRange', 'Unknown')
+                                
+                                access_icon = '✅' if access.lower() == 'allow' else '❌'
+                                print(f"    - {access_icon} **{rule.get('name', 'Unknown')}** (Priority: {priority})")
+                                print(f"      - {direction} {protocol} to {dest} on ports {ports}")
+                
+                # NIC NSGs (deduplicated by NSG name)
+                if nic_nsgs:
+                    print("\n**NIC NSGs:**")
+                    
+                    # Group NICs by NSG name to avoid duplicates
+                    nsg_groups = {}
+                    for nsg in nic_nsgs:
+                        nsg_name = nsg.get('nsgName', 'unknown')
+                        vmss_name = nsg.get('vmssName', 'unknown')
+                        
+                        if nsg_name not in nsg_groups:
+                            nsg_groups[nsg_name] = {
+                                'nsg_data': nsg,
+                                'vmss_list': []
+                            }
+                        nsg_groups[nsg_name]['vmss_list'].append(vmss_name)
+                    
+                    # Display each unique NSG with its associated VMSS instances
+                    for nsg_name, group_data in nsg_groups.items():
+                        nsg = group_data['nsg_data']
+                        vmss_list = group_data['vmss_list']
+                        custom_rules = len(nsg.get('rules', []))
+                        default_rules = len(nsg.get('defaultRules', []))
+                        
+                        # Show NSG with all VMSS instances using it
+                        vmss_names = ', '.join(vmss_list)
+                        print(f"- **{nsg_name}** (used by: {vmss_names})")
+                        print(f"  - Custom Rules: {custom_rules}, Default Rules: {default_rules}")
+                        
+                        # Show custom rules if any
+                        if custom_rules > 0 and nsg.get('rules'):
+                            print(f"  - **Custom Rules:**")
+                            for rule in nsg.get('rules', []):
+                                access = rule.get('access', 'Unknown')
+                                direction = rule.get('direction', 'Unknown')
+                                priority = rule.get('priority', 'Unknown')
+                                protocol = rule.get('protocol', 'Unknown')
+                                dest = rule.get('destinationAddressPrefix', 'Unknown')
+                                ports = rule.get('destinationPortRange', 'Unknown')
+                                
+                                access_icon = '✅' if access.lower() == 'allow' else '❌'
+                                print(f"    - {access_icon} **{rule.get('name', 'Unknown')}** (Priority: {priority})")
+                                print(f"      - {direction} {protocol} to {dest} on ports {ports}")
+                
+                # Show blocking rules details
+                if blocking_rules:
+                    print("\n**⚠️ Potentially Blocking Rules:**")
+                    for rule in blocking_rules:
+                        print(f"- **{rule.get('ruleName', 'Unknown')}** in NSG {rule.get('nsgName', 'Unknown')}")
+                        print(f"  - Priority: {rule.get('priority', 'Unknown')}")
+                        print(f"  - Direction: {rule.get('direction', 'Unknown')}")
+                        print(f"  - Protocol: {rule.get('protocol', 'Unknown')}")
+                        print(f"  - Destination: {rule.get('destination', 'Unknown')}")
+                        print(f"  - Ports: {rule.get('ports', 'Unknown')}")
+                        print(f"  - Impact: {rule.get('impact', 'Unknown')}")
+            
+            print()
+        
         # Findings
         if self.findings:
             print("## Findings")
@@ -2807,6 +3247,7 @@ EXAMPLES:
         self.analyze_vnet_configuration()
         self.analyze_outbound_connectivity()
         self.analyze_vmss_configuration()
+        self.analyze_nsg_configuration()
         self.analyze_private_dns()
         self.analyze_api_server_access()
         self.check_api_connectivity()
