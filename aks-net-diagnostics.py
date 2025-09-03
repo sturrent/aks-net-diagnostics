@@ -39,6 +39,7 @@ class AKSNetworkDiagnostics:
         self.outbound_analysis: Dict[str, Any] = {}
         self.outbound_ips: List[str] = []
         self.private_dns_analysis: Dict[str, Any] = {}
+        self.api_server_access_analysis: Dict[str, Any] = {}
         self.vmss_analysis: List[Dict[str, Any]] = []
         self.api_probe_results: Optional[Dict[str, Any]] = None
         self.failure_analysis: Dict[str, Any] = {"enabled": False}
@@ -942,6 +943,260 @@ EXAMPLES:
                 "analysis": "System-managed private DNS zone"
             }
     
+    def analyze_api_server_access(self):
+        """Analyze API server access configuration including authorized IP ranges"""
+        self.logger.info("Analyzing API server access configuration...")
+        
+        api_server_profile = self.cluster_info.get('apiServerAccessProfile')
+        if not api_server_profile:
+            self.logger.info("  - No API server access profile found")
+            return
+        
+        # Initialize API server access analysis
+        self.api_server_access_analysis = {
+            "privateCluster": api_server_profile.get('enablePrivateCluster', False),
+            "authorizedIpRanges": api_server_profile.get('authorizedIpRanges', []),
+            "disableRunCommand": api_server_profile.get('disableRunCommand', False),
+            "analysis": {},
+            "securityFindings": [],
+            "accessRestrictions": {}
+        }
+        
+        # Analyze authorized IP ranges
+        self._analyze_authorized_ip_ranges()
+        
+        # Check for security best practices
+        self._validate_api_security_configuration()
+        
+        # Analyze access restrictions and their implications
+        self._analyze_access_restrictions()
+    
+    def _analyze_authorized_ip_ranges(self):
+        """Analyze authorized IP ranges configuration"""
+        authorized_ranges = self.api_server_access_analysis["authorizedIpRanges"]
+        
+        if not authorized_ranges:
+            self.logger.info("  - No authorized IP ranges configured (unrestricted access)")
+            self.api_server_access_analysis["analysis"]["ipRangeRestriction"] = "none"
+            return
+        
+        self.logger.info(f"  - Found {len(authorized_ranges)} authorized IP range(s):")
+        for range_cidr in authorized_ranges:
+            self.logger.info(f"    • {range_cidr}")
+        
+        self.api_server_access_analysis["analysis"]["ipRangeRestriction"] = "enabled"
+        self.api_server_access_analysis["analysis"]["rangeCount"] = len(authorized_ranges)
+        
+        # Analyze each range for security implications
+        for range_cidr in authorized_ranges:
+            self._analyze_ip_range_security(range_cidr)
+    
+    def _analyze_ip_range_security(self, range_cidr):
+        """Analyze individual IP range for security implications"""
+        try:
+            import ipaddress
+            
+            # Parse the CIDR range
+            network = ipaddress.ip_network(range_cidr, strict=False)
+            
+            # Calculate range size
+            num_addresses = network.num_addresses
+            prefix_length = network.prefixlen
+            
+            # Security analysis based on range characteristics
+            if range_cidr == "0.0.0.0/0":
+                self.api_server_access_analysis["securityFindings"].append({
+                    "severity": "critical",
+                    "range": range_cidr,
+                    "issue": "Complete unrestricted access",
+                    "description": "0.0.0.0/0 allows access from any IP address on the internet",
+                    "recommendation": "Replace with specific IP ranges or CIDR blocks for your organization"
+                })
+            elif prefix_length <= 8:  # /8 or larger (16M+ addresses)
+                self.api_server_access_analysis["securityFindings"].append({
+                    "severity": "high",
+                    "range": range_cidr,
+                    "issue": "Very broad IP range",
+                    "description": f"Range contains {num_addresses:,} addresses (/{prefix_length})",
+                    "recommendation": "Consider narrowing to more specific IP ranges"
+                })
+            elif prefix_length <= 16:  # /16 or larger (65K+ addresses)
+                self.api_server_access_analysis["securityFindings"].append({
+                    "severity": "medium",
+                    "range": range_cidr,
+                    "issue": "Broad IP range",
+                    "description": f"Range contains {num_addresses:,} addresses (/{prefix_length})",
+                    "recommendation": "Review if this broad range is necessary"
+                })
+            elif prefix_length >= 32:  # Single IP
+                if self.verbose:
+                    self.logger.info(f"    ✅ Specific IP address: {range_cidr}")
+            else:  # Reasonable range
+                if self.verbose:
+                    self.logger.info(f"    ✅ Reasonable range: {range_cidr} ({num_addresses} addresses)")
+            
+            # Check for private IP ranges in authorized list
+            if network.is_private:
+                self.api_server_access_analysis["analysis"]["containsPrivateRanges"] = True
+                if self.verbose:
+                    self.logger.info(f"    📝 Private IP range detected: {range_cidr}")
+            
+        except Exception as e:
+            self.api_server_access_analysis["securityFindings"].append({
+                "severity": "warning",
+                "range": range_cidr,
+                "issue": "Invalid IP range format",
+                "description": f"Could not parse IP range: {str(e)}",
+                "recommendation": "Verify the CIDR notation is correct"
+            })
+    
+    def _validate_api_security_configuration(self):
+        """Validate API server security configuration"""
+        # Check if run command is disabled
+        disable_run_command = self.api_server_access_analysis["disableRunCommand"]
+        if disable_run_command:
+            if self.verbose:
+                self.logger.info("  ✅ Run command is disabled (enhanced security)")
+        else:
+            if self.verbose:
+                self.logger.info("  📝 Run command is enabled")
+        
+        # Check private cluster configuration
+        is_private = self.api_server_access_analysis["privateCluster"]
+        authorized_ranges = self.api_server_access_analysis["authorizedIpRanges"]
+        
+        if is_private and authorized_ranges:
+            self.api_server_access_analysis["securityFindings"].append({
+                "severity": "info",
+                "issue": "Redundant configuration",
+                "description": "Both private cluster and authorized IP ranges are enabled",
+                "recommendation": "Private clusters don't need authorized IP ranges since they're already isolated"
+            })
+        elif not is_private and not authorized_ranges:
+            self.api_server_access_analysis["securityFindings"].append({
+                "severity": "medium",
+                "issue": "Unrestricted public access",
+                "description": "API server is publicly accessible without IP restrictions",
+                "recommendation": "Consider enabling authorized IP ranges or converting to a private cluster"
+            })
+    
+    def _analyze_access_restrictions(self):
+        """Analyze access restrictions and their implications"""
+        authorized_ranges = self.api_server_access_analysis["authorizedIpRanges"]
+        is_private = self.api_server_access_analysis["privateCluster"]
+        
+        # Determine access model
+        if is_private:
+            access_model = "private"
+            access_description = "Private cluster - API server only accessible from VNet"
+        elif authorized_ranges:
+            access_model = "restricted_public"
+            access_description = f"Public cluster with IP restrictions ({len(authorized_ranges)} range(s))"
+        else:
+            access_model = "unrestricted_public"
+            access_description = "Public cluster with unrestricted access"
+        
+        self.api_server_access_analysis["accessRestrictions"] = {
+            "model": access_model,
+            "description": access_description,
+            "implications": self._get_access_implications(access_model, authorized_ranges)
+        }
+    
+    def _get_access_implications(self, access_model, authorized_ranges):
+        """Get implications of the current access configuration"""
+        implications = []
+        
+        if access_model == "private":
+            implications.extend([
+                "✅ API server is isolated from the internet",
+                "✅ Access only from resources within the VNet or peered networks",
+                "📝 Requires VPN or ExpressRoute for external access",
+                "📝 Private DNS zone required for name resolution"
+            ])
+        elif access_model == "restricted_public":
+            implications.extend([
+                "✅ API server access is restricted to specified IP ranges",
+                "⚠️ API server is still exposed to the internet",
+                "📝 Users/services must access from authorized IP ranges",
+                "📝 Node-to-API traffic must originate from authorized ranges"
+            ])
+            
+            # Check if outbound IPs are in authorized ranges
+            if hasattr(self, 'outbound_ips') and self.outbound_ips:
+                self._check_outbound_ip_authorization(authorized_ranges, implications)
+                
+        else:  # unrestricted_public
+            implications.extend([
+                "⚠️ API server is publicly accessible from any IP",
+                "⚠️ No network-level access restrictions",
+                "📝 Security relies entirely on authentication and RBAC",
+                "📝 Consider implementing IP restrictions for enhanced security"
+            ])
+        
+        return implications
+    
+    def _check_outbound_ip_authorization(self, authorized_ranges, implications):
+        """Check if cluster outbound IPs are authorized for API access"""
+        if not authorized_ranges:
+            return
+        
+        try:
+            import ipaddress
+            
+            # Parse authorized ranges
+            authorized_networks = []
+            for range_cidr in authorized_ranges:
+                try:
+                    authorized_networks.append(ipaddress.ip_network(range_cidr, strict=False))
+                except:
+                    continue
+            
+            # Check each outbound IP
+            unauthorized_outbound_ips = []
+            for outbound_ip in self.outbound_ips:
+                # Clean up IP (remove port, prefix notation, etc.)
+                clean_ip = outbound_ip.split(':')[0].split('/')[0].strip()
+                if '(' in clean_ip:  # Handle "IP (range)" format
+                    clean_ip = clean_ip.split('(')[0].strip()
+                
+                try:
+                    ip_addr = ipaddress.ip_address(clean_ip)
+                    is_authorized = any(ip_addr in network for network in authorized_networks)
+                    
+                    if not is_authorized:
+                        unauthorized_outbound_ips.append(clean_ip)
+                except:
+                    continue
+            
+            if unauthorized_outbound_ips:
+                implications.append(f"❌ Outbound IPs not in authorized ranges: {', '.join(unauthorized_outbound_ips)}")
+                implications.append("📝 Nodes may not be able to communicate with API server")
+                
+                # Add to security findings
+                self.api_server_access_analysis["securityFindings"].append({
+                    "severity": "critical",
+                    "issue": "Outbound IPs not authorized",
+                    "description": f"Cluster outbound IPs ({', '.join(unauthorized_outbound_ips)}) are not in authorized IP ranges",
+                    "recommendation": "Add cluster outbound IPs to authorized ranges or nodes cannot access the API server"
+                })
+            else:
+                implications.append("✅ All outbound IPs are in authorized ranges")
+                
+        except Exception as e:
+            implications.append(f"⚠️ Could not validate outbound IP authorization: {e}")
+    
+    def _get_current_client_ip(self):
+        """Attempt to get the current client's public IP address"""
+        try:
+            # Try to get public IP using a simple web service
+            import urllib.request
+            import urllib.error
+            
+            response = urllib.request.urlopen('https://api.ipify.org', timeout=5)
+            return response.read().decode('utf-8').strip()
+        except:
+            return None
+    
     def check_api_connectivity(self):
         """Check API server connectivity and network reachability from cluster nodes"""
         self.logger.info("Checking API connectivity...")
@@ -1697,6 +1952,9 @@ EXAMPLES:
         # Check UDR configuration issues
         self._analyze_udr_issues(findings)
         
+        # Check API server access configuration issues
+        self._analyze_api_server_access_issues(findings)
+        
         # Check connectivity test results (only if cluster is running)
         if not getattr(self, '_cluster_stopped', False):
             self._analyze_connectivity_test_results(findings)
@@ -2017,6 +2275,69 @@ EXAMPLES:
                     "recommendation": "Review the detailed UDR analysis in the JSON report for specific route impacts and recommendations."
                 })
     
+    def _analyze_api_server_access_issues(self, findings):
+        """Analyze API server access configuration issues"""
+        if not hasattr(self, 'api_server_access_analysis') or not self.api_server_access_analysis:
+            return
+        
+        # Add security findings from API server access analysis
+        security_findings = self.api_server_access_analysis.get("securityFindings", [])
+        for security_finding in security_findings:
+            severity = security_finding.get("severity", "info")
+            issue = security_finding.get("issue", "Unknown issue")
+            description = security_finding.get("description", "")
+            recommendation = security_finding.get("recommendation", "")
+            range_info = security_finding.get("range", "")
+            
+            # Create finding code based on issue type
+            if "unrestricted access" in issue.lower():
+                code = "API_UNRESTRICTED_ACCESS"
+            elif "broad ip range" in issue.lower():
+                code = "API_BROAD_IP_RANGE" 
+            elif "outbound ips not authorized" in issue.lower():
+                code = "API_OUTBOUND_NOT_AUTHORIZED"
+            elif "invalid ip range" in issue.lower():
+                code = "API_INVALID_IP_RANGE"
+            elif "redundant configuration" in issue.lower():
+                code = "API_REDUNDANT_CONFIG"
+            elif "unrestricted public access" in issue.lower():
+                code = "API_UNRESTRICTED_PUBLIC"
+            else:
+                code = "API_SECURITY_ISSUE"
+            
+            message = f"API server access: {issue}"
+            if range_info:
+                message += f" ({range_info})"
+            if description:
+                message += f" - {description}"
+            
+            findings.append({
+                "severity": severity,
+                "code": code,
+                "message": message,
+                "recommendation": recommendation
+            })
+        
+        # Add summary finding for API server access configuration
+        authorized_ranges = self.api_server_access_analysis.get("authorizedIpRanges", [])
+        is_private = self.api_server_access_analysis.get("privateCluster", False)
+        access_model = self.api_server_access_analysis.get("accessRestrictions", {}).get("model", "unknown")
+        
+        if access_model == "unrestricted_public" and not security_findings:
+            findings.append({
+                "severity": "info",
+                "code": "API_PUBLIC_UNRESTRICTED",
+                "message": "API server is publicly accessible without IP restrictions",
+                "recommendation": "Consider implementing authorized IP ranges or converting to a private cluster for enhanced security"
+            })
+        elif access_model == "restricted_public":
+            findings.append({
+                "severity": "info", 
+                "code": "API_RESTRICTED_ACCESS",
+                "message": f"API server access restricted to {len(authorized_ranges)} authorized IP range(s)",
+                "recommendation": "Verify that all necessary IP ranges are included and review ranges periodically"
+            })
+    
     def _analyze_connectivity_test_results(self, findings):
         """Analyze connectivity test results and add findings"""
         if not hasattr(self, 'api_probe_results') or not self.api_probe_results:
@@ -2097,6 +2418,7 @@ EXAMPLES:
                 "vnets": self.vnets_analysis,
                 "outbound": self.outbound_analysis,
                 "privateDns": self.private_dns_analysis,
+                "apiServerAccess": self.api_server_access_analysis,
                 "vmssConfiguration": self.vmss_analysis,
                 "routingAnalysis": {
                     "outboundType": self.cluster_info.get('networkProfile', {}).get('outboundType', 'loadBalancer'),
@@ -2267,6 +2589,28 @@ EXAMPLES:
         else:
             print("- **Type:** Public cluster")
             print(f"- **Public FQDN:** {self.cluster_info.get('fqdn', '')}")
+        
+        # Add authorized IP ranges information
+        if api_server_profile:
+            authorized_ranges = api_server_profile.get('authorizedIpRanges', [])
+            if authorized_ranges:
+                print(f"- **Authorized IP Ranges:** {len(authorized_ranges)} range(s)")
+                for range_cidr in authorized_ranges:
+                    print(f"  - {range_cidr}")
+                
+                # Show access implications if we have the analysis
+                if hasattr(self, 'api_server_access_analysis') and self.api_server_access_analysis:
+                    access_restrictions = self.api_server_access_analysis.get('accessRestrictions', {})
+                    implications = access_restrictions.get('implications', [])
+                    if implications:
+                        print("- **Access Implications:**")
+                        for implication in implications:
+                            print(f"  {implication}")
+            else:
+                print("- **Access Restrictions:** None (unrestricted public access)")
+                if not is_private:
+                    print("  ⚠️ API server is accessible from any IP address on the internet")
+        
         print()
         
         # Outbound connectivity
@@ -2442,6 +2786,7 @@ EXAMPLES:
         self.analyze_outbound_connectivity()
         self.analyze_vmss_configuration()
         self.analyze_private_dns()
+        self.analyze_api_server_access()
         self.check_api_connectivity()
         self.analyze_misconfigurations()
         self.generate_report()
