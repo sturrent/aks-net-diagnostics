@@ -12,7 +12,7 @@ python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group
 python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --verbose
 
 # Include active connectivity testing from cluster nodes
-python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-api
+python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
 ```
 
 ## ✨ Key Features
@@ -36,7 +36,7 @@ python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-api
 ### **🛡️ Read Only Operations**
 
 - **Read-Only**: Uses only Azure CLI show/list commands
-- **Optional Probing**: Active connectivity tests require explicit `--probe-api` flag
+- **Optional Probing**: Active connectivity tests require explicit `--probe-test` flag
 
 ## 📋 Prerequisites
 
@@ -62,7 +62,7 @@ python3 aks-net-diagnostics.py -n prod-cluster -g prod-rg
 python3 aks-net-diagnostics.py -n failed-cluster -g rg --verbose
 
 # Active connectivity testing (executes commands in cluster nodes)
-python3 aks-net-diagnostics.py -n cluster -g rg --probe-api
+python3 aks-net-diagnostics.py -n cluster -g rg --probe-test
 ```
 
 ### Advanced Scenarios
@@ -78,7 +78,7 @@ python3 aks-net-diagnostics.py -n secure-cluster -g rg --verbose
 python3 aks-net-diagnostics.py -n firewall-cluster -g rg --verbose
 
 # All options combined
-python3 aks-net-diagnostics.py -n cluster -g rg --verbose --probe-api
+python3 aks-net-diagnostics.py -n cluster -g rg --verbose --probe-test
 
 # Specific subscription
 python3 aks-net-diagnostics.py -n cluster -g rg --subscription "12345678-1234-1234-1234-123456789012"
@@ -172,7 +172,7 @@ python3 aks-net-diagnostics.py -n cluster -g rg --subscription "12345678-1234-12
 | `-n <NAME>` | AKS cluster name | Required |
 | `-g <GROUP>` | Resource group name | Required |
 | `--verbose` | Show detailed analysis output and test results | Summary mode |
-| `--probe-api` | Enable active connectivity tests from cluster nodes | Disabled |
+| `--probe-test` | Enable active connectivity tests from cluster nodes | Disabled |
 | `--subscription <ID>` | Azure subscription override | Current context |
 
 ## 🏗️ Real-World Scenarios

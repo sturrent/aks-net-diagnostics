@@ -23,7 +23,7 @@ class AKSNetworkDiagnostics:
         self.aks_name: str = ""
         self.aks_rg: str = ""
         self.subscription: Optional[str] = None
-        self.probe_api: bool = False
+        self.probe_test: bool = False
         self.json_out: Optional[str] = None
         self.no_json: bool = False
         self.verbose: bool = False
@@ -61,7 +61,7 @@ class AKSNetworkDiagnostics:
 EXAMPLES:
   %(prog)s -n my-aks-cluster -g my-resource-group
   %(prog)s -n my-cluster -g my-rg --subscription 12345678-1234-1234-1234-123456789012
-  %(prog)s -n my-cluster -g my-rg --probe-api --json-out custom-report.json
+  %(prog)s -n my-cluster -g my-rg --probe-test --json-out custom-report.json
   %(prog)s -n my-cluster -g my-rg --verbose --no-json
             """
         )
@@ -75,7 +75,7 @@ EXAMPLES:
         # Optional arguments
         parser.add_argument('--subscription',
                           help='Azure subscription ID (overrides current context)')
-        parser.add_argument('--probe-api', action='store_true',
+        parser.add_argument('--probe-test', action='store_true',
                           help='Enable active connectivity checks from VMSS instances (WARNING: Executes commands inside cluster nodes)')
         parser.add_argument('--json-out',
                           help='Output JSON report to file (default: auto-generated filename)')
@@ -91,7 +91,7 @@ EXAMPLES:
         self.aks_name = args.name
         self.aks_rg = args.resource_group
         self.subscription = args.subscription
-        self.probe_api = args.probe_api
+        self.probe_test = args.probe_test
         self.json_out = args.json_out
         self.no_json = args.no_json
         self.verbose = args.verbose
@@ -1201,8 +1201,8 @@ EXAMPLES:
         """Check API server connectivity and network reachability from cluster nodes"""
         self.logger.info("Checking API connectivity...")
         
-        if not self.probe_api:
-            self.logger.info("API connectivity probing disabled. Use --probe-api to enable active connectivity checks.")
+        if not self.probe_test:
+            self.logger.info("API connectivity probing disabled. Use --probe-test to enable active connectivity checks.")
             return
         
         # Check if cluster is stopped
