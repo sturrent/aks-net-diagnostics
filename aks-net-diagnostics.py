@@ -1251,13 +1251,37 @@ EXAMPLES:
         except Exception:
             # If parsing fails, return the raw message as stdout
             stdout = message
+        
+        # Compact the output by replacing newlines with \n characters for JSON storage
+        # This makes verbose output (like curl -v) more compact and JSON-friendly
+        stdout = self._compact_output_for_json(stdout)
+        stderr = self._compact_output_for_json(stderr)
             
         return stdout, stderr, exit_code
+    
+    def _compact_output_for_json(self, output):
+        """Compact multi-line output into a single line with \\n characters for better JSON formatting"""
+        if not output:
+            return output
+        
+        # Replace actual newlines with \n characters and clean up extra whitespace
+        compacted = output.replace('\n', '\\n').replace('\r', '')
+        
+        # Remove excessive whitespace sequences that might occur
+        import re
+        compacted = re.sub(r'\\n\s*\\n', '\\n', compacted)  # Remove empty lines
+        compacted = re.sub(r'\s+', ' ', compacted)  # Collapse multiple spaces
+        compacted = compacted.strip()
+        
+        return compacted
     
     def _is_successful_http_connection(self, stdout, stderr, exit_code):
         """Check if an HTTP connectivity test was successful"""
         # Combine stdout and stderr for analysis since curl -v outputs to both
+        # Handle both regular newlines and compacted \\n format
         combined_output = f"{stdout}\n{stderr}".lower()
+        # Convert \\n back to actual newlines for pattern matching
+        combined_output = combined_output.replace('\\n', '\n')
         
         # Check for successful connection indicators
         connection_indicators = [
@@ -1328,9 +1352,10 @@ EXAMPLES:
         if not expected_keywords:
             return True  # No specific expectations
         
-        output_lower = output.lower()
+        # Handle compacted output format
+        output_to_check = output.replace('\\n', '\n').lower()
         for keyword in expected_keywords:
-            if keyword.lower() not in output_lower:
+            if keyword.lower() not in output_to_check:
                 return False
         return True
     
@@ -1343,7 +1368,8 @@ EXAMPLES:
         test_name = test.get('name', '').lower()
         if 'http' in test_name or 'connectivity' in test_name:
             # Combine stdout and stderr for HTTP tests since curl -v uses stderr for connection details
-            combined_output = f"{stdout}\n{stderr}".lower()
+            # Handle compacted format by converting \\n back to newlines for pattern matching
+            combined_output = f"{stdout}\n{stderr}".replace('\\n', '\n').lower()
             for keyword in expected_keywords:
                 if keyword.lower() not in combined_output:
                     return False
@@ -1358,14 +1384,17 @@ EXAMPLES:
         import re
         
         try:
+            # Convert compacted format back to regular format for parsing
+            output_to_parse = nslookup_output.replace('\\n', '\n')
+            
             # Check for DNS resolution failures first
-            if any(error in nslookup_output.lower() for error in ['nxdomain', 'servfail', 'refused', "can't find"]):
+            if any(error in output_to_parse.lower() for error in ['nxdomain', 'servfail', 'refused', "can't find"]):
                 return False  # DNS resolution failed completely
             
             # Parse nslookup output to extract IP addresses
             # Look for lines like "Address: 10.1.2.3" or "10.1.2.3"
             ip_pattern = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
-            found_ips = re.findall(ip_pattern, nslookup_output)
+            found_ips = re.findall(ip_pattern, output_to_parse)
             
             if not found_ips:
                 return False  # No IP addresses found
@@ -1373,7 +1402,7 @@ EXAMPLES:
             # Filter out DNS server IPs (usually the first IP listed)
             # DNS server IPs are typically shown as "Server: 10.1.0.10" or "Address: 10.1.0.10#53"
             dns_server_pattern = r'(?:Server:|Address:)\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})(?:#\d+)?'
-            dns_server_ips = set(re.findall(dns_server_pattern, nslookup_output))
+            dns_server_ips = set(re.findall(dns_server_pattern, output_to_parse))
             
             # Check resolved IPs (excluding DNS server IPs)
             resolved_ips = [ip for ip in found_ips if ip not in dns_server_ips]
