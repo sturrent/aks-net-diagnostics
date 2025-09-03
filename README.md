@@ -22,20 +22,19 @@ python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-api
 - **Network Configuration**: Outbound types (LoadBalancer/NAT Gateway/UDR), VNet topology, DNS settings
 - **UDR Analysis**: User Defined Routes detection, virtual appliance routing, traffic impact assessment  
 - **Private Clusters**: DNS zone validation, VNet links, private endpoint verification
-- **Security Assessment**: NSG rules, route tables, authorized IP ranges
+- **Security Assessment**: NSG rules, route tables, authorized IP ranges (Work in progress)
 - **Active Connectivity**: Optional VMSS-based testing (DNS resolution, HTTPS connectivity, API server access)
 
-### **📊 Smart Output Modes**
+### **📊 Output Modes**
 
 - **Summary Mode** (default): Concise findings with key issues highlighted
 - **Verbose Mode** (`--verbose`): Detailed report with comprehensive analysis and test outputs
 - **JSON Reports**: Structured data automatically saved to timestamped files
 
-### **🛡️ Production Safe**
+### **🛡️ Read Only Operations**
 
 - **Read-Only**: Uses only Azure CLI show/list commands
 - **Optional Probing**: Active connectivity tests require explicit `--probe-api` flag
-- **Performance Optimized**: Limits connectivity testing to single VMSS instance
 
 ## 📋 Prerequisites
 
