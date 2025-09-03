@@ -354,7 +354,11 @@ EXAMPLES:
                     })
                     effective_summary["description"] = "User Defined Routing configured"
             elif outbound_type == "managedNATGateway":
-                effective_summary["description"] = "Managed NAT Gateway (analysis not yet implemented)"
+                if self.outbound_ips:
+                    ip_list = ', '.join(self.outbound_ips)
+                    effective_summary["description"] = f"Managed NAT Gateway with outbound IPs: {ip_list}"
+                else:
+                    effective_summary["description"] = "Managed NAT Gateway (no outbound IPs detected)"
         
         return effective_summary
     
@@ -374,6 +378,9 @@ EXAMPLES:
             elif mechanism == "virtualAppliance" and effective_summary["virtual_appliance_ips"]:
                 for ip in effective_summary["virtual_appliance_ips"]:
                     self.logger.info(f"    Virtual appliance IP: {ip}")
+            elif mechanism == "managedNATGateway" and effective_summary["load_balancer_ips"]:  # NAT Gateway IPs are stored in load_balancer_ips field
+                for ip in effective_summary["load_balancer_ips"]:
+                    self.logger.info(f"    NAT Gateway outbound IP: {ip}")
         
         # Display warnings
         for warning in effective_summary.get("warnings", []):
@@ -480,8 +487,121 @@ EXAMPLES:
     def _analyze_nat_gateway_outbound(self):
         """Analyze NAT Gateway outbound configuration"""
         self.logger.info("  - Analyzing NAT Gateway configuration...")
-        # NAT Gateway analysis would go here
-        pass
+        
+        # Get the managed cluster's resource group
+        mc_rg = self.cluster_info.get('nodeResourceGroup', '')
+        if not mc_rg:
+            if self.verbose:
+                self.logger.info("    No node resource group found")
+            return
+        
+        # List NAT Gateways in the managed resource group
+        natgw_cmd = ['network', 'nat', 'gateway', 'list', '-g', mc_rg, '-o', 'json']
+        nat_gateways = self.run_azure_cli(natgw_cmd)
+        
+        if not isinstance(nat_gateways, list):
+            if self.verbose:
+                self.logger.info(f"    No NAT Gateways found in {mc_rg}")
+            return
+        
+        # Process each NAT Gateway
+        for natgw in nat_gateways:
+            natgw_name = natgw.get('name', '')
+            if not natgw_name:
+                continue
+            
+            self.logger.info(f"    Found NAT Gateway: {natgw_name}")
+            
+            # Get public IP prefixes and public IPs associated with this NAT Gateway
+            public_ip_prefixes = natgw.get('publicIpPrefixes', [])
+            public_ips = natgw.get('publicIpAddresses', [])
+            
+            # Extract IPs from public IP resources
+            for public_ip_ref in public_ips:
+                public_ip_id = public_ip_ref.get('id', '')
+                if public_ip_id:
+                    public_ip_info = self._get_public_ip_details(public_ip_id)
+                    if public_ip_info:
+                        ip_address = public_ip_info.get('ipAddress', '')
+                        if ip_address:
+                            self.outbound_ips.append(ip_address)
+                            if self.verbose:
+                                self.logger.info(f"      Public IP: {ip_address}")
+            
+            # Extract IPs from public IP prefixes
+            for prefix_ref in public_ip_prefixes:
+                prefix_id = prefix_ref.get('id', '')
+                if prefix_id:
+                    prefix_info = self._get_public_ip_prefix_details(prefix_id)
+                    if prefix_info:
+                        ip_prefix = prefix_info.get('ipPrefix', '')
+                        if ip_prefix:
+                            # For prefixes, we'll note the range but also try to get individual IPs
+                            if self.verbose:
+                                self.logger.info(f"      Public IP Prefix: {ip_prefix}")
+                            # Extract the first IP from the prefix for outbound IP tracking
+                            try:
+                                import ipaddress
+                                network = ipaddress.ip_network(ip_prefix, strict=False)
+                                first_ip = str(list(network.hosts())[0]) if list(network.hosts()) else str(network.network_address)
+                                self.outbound_ips.append(f"{ip_prefix} (range)")
+                            except:
+                                self.outbound_ips.append(f"{ip_prefix} (prefix)")
+        
+        if not self.outbound_ips and self.verbose:
+            self.logger.info("    No outbound IPs detected from NAT Gateway")
+    
+    def _get_public_ip_details(self, public_ip_id):
+        """Get detailed information about a public IP resource"""
+        try:
+            # Parse public IP ID to extract components
+            parts = public_ip_id.split('/')
+            if len(parts) < 9:
+                return None
+            
+            subscription_id = parts[2]
+            resource_group = parts[4]
+            public_ip_name = parts[8]
+            
+            # Get public IP details
+            cmd = ['network', 'public-ip', 'show',
+                   '--subscription', subscription_id,
+                   '-g', resource_group,
+                   '-n', public_ip_name,
+                   '-o', 'json']
+            
+            return self.run_azure_cli(cmd)
+            
+        except Exception as e:
+            if self.verbose:
+                self.logger.info(f"    Error getting public IP details for {public_ip_id}: {e}")
+            return None
+    
+    def _get_public_ip_prefix_details(self, prefix_id):
+        """Get detailed information about a public IP prefix resource"""
+        try:
+            # Parse public IP prefix ID to extract components
+            parts = prefix_id.split('/')
+            if len(parts) < 9:
+                return None
+            
+            subscription_id = parts[2]
+            resource_group = parts[4]
+            prefix_name = parts[8]
+            
+            # Get public IP prefix details
+            cmd = ['network', 'public-ip', 'prefix', 'show',
+                   '--subscription', subscription_id,
+                   '-g', resource_group,
+                   '-n', prefix_name,
+                   '-o', 'json']
+            
+            return self.run_azure_cli(cmd)
+            
+        except Exception as e:
+            if self.verbose:
+                self.logger.info(f"    Error getting public IP prefix details for {prefix_id}: {e}")
+            return None
 
     def _analyze_node_subnet_udrs(self):
         """Analyze User Defined Routes on node subnets"""
@@ -2066,16 +2186,21 @@ EXAMPLES:
         print()
         print("**Findings Summary:**")
         
-        critical_count = len([f for f in self.findings if f.get('severity') in ['critical', 'error']])
-        warning_count = len([f for f in self.findings if f.get('severity') == 'warning'])
+        critical_findings = [f for f in self.findings if f.get('severity') in ['critical', 'error']]
+        warning_findings = [f for f in self.findings if f.get('severity') == 'warning']
         
-        if critical_count == 0 and warning_count == 0:
+        if len(critical_findings) == 0 and len(warning_findings) == 0:
             print("- ✅ No critical issues detected")
         else:
-            if critical_count > 0:
-                print(f"- ❌ {critical_count} Critical/Error finding(s)")
-            if warning_count > 0:
-                print(f"- ⚠️ {warning_count} Warning finding(s)")
+            # Show critical/error findings
+            for finding in critical_findings:
+                message = finding.get('message', 'Unknown issue')
+                print(f"- ❌ {message}")
+            
+            # Show warning findings
+            for finding in warning_findings:
+                message = finding.get('message', 'Unknown issue')
+                print(f"- ⚠️ {message}")
         
         print()
         print("Tip: Use --verbose flag for detailed analysis or check the JSON report for complete findings.")
