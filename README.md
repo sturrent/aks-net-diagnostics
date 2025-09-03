@@ -84,7 +84,7 @@ python3 aks-net-diagnostics.py -n cluster -g rg --verbose --probe-api
 python3 aks-net-diagnostics.py -n cluster -g rg --subscription "12345678-1234-1234-1234-123456789012"
 ```
 
-## 🔥 Enhanced Features
+## 🔥 Features
 
 ### **NAT Gateway Analysis**
 
@@ -154,16 +154,6 @@ python3 aks-net-diagnostics.py -n cluster -g rg --subscription "12345678-1234-12
 | `CONNECTIVITY_HTTPS_FAILURE` | HTTPS connectivity tests failed (firewall/NSG blocking) | ❌ Critical |
 | `CONNECTIVITY_API_SERVER_FAILURE` | API server connectivity test failed | ❌ Critical |
 | `PDNS_DNS_HOST_VNET_LINK_MISSING` | DNS server in peered VNet not linked to private DNS zone | ❌ Critical |
-
-### **Security Analysis**
-
-| Finding | Description | Recommendation |
-|---------|-------------|----------------|
-| **Unrestricted public access** | API server publicly accessible without IP restrictions | Enable authorized IP ranges or convert to private cluster |
-| **Very broad IP range** | Authorized ranges with /8 or larger prefixes (16M+ addresses) | Narrow to specific organizational IP ranges |
-| **Broad IP range** | Authorized ranges with /16 or larger prefixes (65K+ addresses) | Review if broad range is necessary |
-| **Complete unrestricted access** | 0.0.0.0/0 in authorized ranges | Replace with specific IP ranges |
-| **Outbound IPs not authorized** | Cluster nodes cannot access API server due to IP restrictions | Add outbound IPs to authorized ranges |
 
 ### **Analysis Coverage**
 
