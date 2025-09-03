@@ -289,7 +289,8 @@ EXAMPLES:
         # Get the managed cluster's load balancer
         mc_rg = self.cluster_info.get('nodeResourceGroup', '')
         if not mc_rg:
-            self.logger.info("    No node resource group found")
+            if self.verbose:
+                self.logger.info("    No node resource group found")
             return
         
         # List load balancers in the managed resource group
@@ -297,61 +298,45 @@ EXAMPLES:
         load_balancers = self.run_azure_cli(lb_cmd)
         
         if not isinstance(load_balancers, list):
-            self.logger.info(f"    No load balancers found in {mc_rg}")
+            if self.verbose:
+                self.logger.info(f"    No load balancers found in {mc_rg}")
             return
         
-        self.logger.info(f"    Found {len(load_balancers)} load balancer(s)")
-        
+        # Process load balancers quietly and only report the final results
         for lb in load_balancers:
             lb_name = lb.get('name', '')
             if not lb_name:
                 continue
             
-            self.logger.info(f"    Analyzing load balancer: {lb_name}")
-            
             # Check outbound rules first
             outbound_rules = lb.get('outboundRules', [])
             frontend_configs = lb.get('frontendIpConfigurations', [])
-            
-            self.logger.info(f"    Found {len(outbound_rules)} outbound rule(s) and {len(frontend_configs)} frontend config(s)")
             
             # Collect frontend config IDs that might have outbound IPs
             frontend_config_ids = []
             
             # Add frontend configs from outbound rules (this is the main path for AKS)
             for rule in outbound_rules:
-                rule_name = rule.get('name', 'unnamed')
-                self.logger.info(f"    Processing outbound rule: {rule_name}")
-                
                 # Try both possible field names for frontend IP configurations
                 frontend_ips = rule.get('frontendIPConfigurations', [])
                 if not frontend_ips:
                     frontend_ips = rule.get('frontendIpConfigurations', [])
                 
-                self.logger.info(f"    Rule has {len(frontend_ips)} frontend IP configuration(s)")
-                
                 for frontend_ip in frontend_ips:
                     if frontend_ip.get('id'):
                         frontend_config_ids.append(frontend_ip['id'])
-                        self.logger.info(f"    Added frontend config ID: {frontend_ip['id']}")
             
             # Also add all direct frontend configs (for standard LB without outbound rules)
             for frontend in frontend_configs:
                 if frontend.get('id'):
                     frontend_config_ids.append(frontend['id'])
-                    self.logger.info(f"    Added direct frontend config ID: {frontend['id']}")
-            
-            self.logger.info(f"    Processing {len(frontend_config_ids)} frontend configuration(s)")
             
             # Process each frontend config
             for config_id in frontend_config_ids:
-                self.logger.info(f"    Checking frontend config: {config_id}")
-                
                 # Extract load balancer name and frontend config name from ID
                 parts = config_id.split('/')
                 if len(parts) >= 11:
                     config_name = parts[10]  # Frontend IP config name
-                    self.logger.info(f"    Config name: {config_name}")
                     
                     # Get the frontend IP configuration details
                     frontend_cmd = ['network', 'lb', 'frontend-ip', 'show', 
@@ -361,8 +346,6 @@ EXAMPLES:
                     if isinstance(frontend_config, dict):
                         public_ip = frontend_config.get('publicIPAddress', {})
                         if public_ip and public_ip.get('id'):
-                            self.logger.info(f"    Found public IP reference: {public_ip['id']}")
-                            
                             # Get public IP details
                             ip_cmd = ['network', 'public-ip', 'show', '--ids', public_ip['id'], '-o', 'json']
                             ip_info = self.run_azure_cli(ip_cmd)
@@ -371,17 +354,12 @@ EXAMPLES:
                                 ip_address = ip_info['ipAddress']
                                 if ip_address not in self.outbound_ips:
                                     self.outbound_ips.append(ip_address)
-                                    self.logger.info(f"    Found outbound IP: {ip_address}")
-                            else:
-                                self.logger.info(f"    No IP address found in public IP resource")
-                        else:
-                            self.logger.info(f"    No public IP address reference in frontend config")
-                    else:
-                        self.logger.info(f"    Failed to get frontend config details")
-                else:
-                    self.logger.info(f"    Invalid frontend config ID format: {config_id}")
         
-        if not self.outbound_ips:
+        # Only show the final summary of discovered outbound IPs
+        if self.outbound_ips:
+            for ip in self.outbound_ips:
+                self.logger.info(f"    Found outbound IP: {ip}")
+        else:
             self.logger.info("    No outbound IPs detected")
     
     def _analyze_udr_outbound(self):
