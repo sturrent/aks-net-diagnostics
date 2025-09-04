@@ -1,6 +1,6 @@
 # AKS Network Diagnostics Tool
 
-A POC Python script for analyzing Azure Kubernetes Service (AKS) cluster network configurations. Performs analysis to diagnose networking issues, validate security configurations, and detect misconfigurations including User Defined Routes (UDRs), NAT Gateway setups, and API server access restrictions.
+A POC Python script for analyzing Azure Kubernetes Service (AKS) cluster network configurations. Performs analysis to diagnose networking issues, validate security configurations, and detect misconfigurations including User Defined Routes (UDRs), DNS, NAT Gateway setups, NSGs, and API server access restrictions.
 
 ## 🚀 Quick Start
 
@@ -22,10 +22,11 @@ python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
 - **Network Configuration**: Outbound types (LoadBalancer/NAT Gateway/UDR), VNet topology, DNS settings
 - **Outbound Connectivity**: Load Balancer IPs, NAT Gateway public IPs and prefixes, UDR conflict detection
 - **UDR Analysis**: User Defined Routes detection, virtual appliance routing, traffic impact assessment  
+- **NSG Analysis**: Network Security Groups on subnets and NICs, rule compliance checking, blocking rule detection
 - **Private Clusters**: DNS zone validation, VNet links, private endpoint verification
 - **API Server Security**: Authorized IP ranges analysis, security validation, outbound IP authorization checks
 - **Security Assessment**: Broad IP range detection, private range validation, connectivity impact analysis
-- **Active Connectivity**: Optional VMSS-based testing (DNS resolution, HTTPS connectivity, API server access)
+- **Active Connectivity**: Optional VMSS-based testing with DNS-first logic (DNS resolution, HTTPS connectivity, API server access)
 
 ### **📊 Output Modes**
 
@@ -61,50 +62,9 @@ python3 aks-net-diagnostics.py -n prod-cluster -g prod-rg
 # Detailed analysis for troubleshooting
 python3 aks-net-diagnostics.py -n failed-cluster -g rg --verbose
 
-# Active connectivity testing (executes commands in cluster nodes)
+# Active connectivity testing (executes nslookup and curl commands in cluster nodes)
 python3 aks-net-diagnostics.py -n cluster -g rg --probe-test
 ```
-
-### Advanced Scenarios
-
-```bash
-# Analyze NAT Gateway configuration
-python3 aks-net-diagnostics.py -n natgw-cluster -g rg --verbose
-
-# Check API server authorized IP ranges
-python3 aks-net-diagnostics.py -n secure-cluster -g rg --verbose
-
-# Diagnose UDR conflicts with firewall
-python3 aks-net-diagnostics.py -n firewall-cluster -g rg --verbose
-
-# All options combined
-python3 aks-net-diagnostics.py -n cluster -g rg --verbose --probe-test
-
-# Specific subscription
-python3 aks-net-diagnostics.py -n cluster -g rg --subscription "12345678-1234-1234-1234-123456789012"
-```
-
-## 🔥 Features
-
-### **NAT Gateway Analysis**
-
-- **Public IP Discovery**: Automatically discovers outbound IPs from NAT Gateway resources
-- **Public IP Prefixes**: Analyzes IP prefixes and extracts individual addresses  
-- **Outbound Validation**: Confirms effective outbound IPs for NAT Gateway clusters
-
-### **API Server Security Analysis**
-
-- **Authorized IP Ranges**: Detects and validates configured IP restrictions
-- **Security Assessment**: Identifies overly broad ranges (0.0.0.0/0, /8, /16 prefixes)
-- **Connectivity Validation**: Ensures cluster outbound IPs can access API server
-- **Critical Findings**: Alerts when nodes cannot communicate with API server
-
-### **UDR Conflict Detection**
-
-- **Override Detection**: Identifies when UDRs override configured outbound type
-- **Virtual Appliance Analysis**: Detailed routing through firewalls/NVAs
-- **Traffic Impact**: Assesses impact on container registry, Azure services, API server
-- **Configuration Warnings**: Alerts about conflicting outbound configurations
 
 ## 📊 Sample Output
 
@@ -151,6 +111,8 @@ python3 aks-net-diagnostics.py -n cluster -g rg --subscription "12345678-1234-12
 | `UDR_DEFAULT_ROUTE_VA` | Virtual appliance routing may affect AKS connectivity | ⚠️ Warning |
 | `UDR_AZURE_SERVICES_VA` | Azure service traffic routed through virtual appliance | ⚠️ Warning |
 | `UDR_CONTAINER_REGISTRY_VA` | Container registry traffic routed through virtual appliance | ⚠️ Warning |
+| `NSG_BLOCKING_RULE_DETECTED` | NSG rule blocking required AKS traffic | ❌ Critical |
+| `CONNECTIVITY_DNS_FAILURE` | DNS resolution tests failed | ❌ Critical |
 | `CONNECTIVITY_HTTPS_FAILURE` | HTTPS connectivity tests failed (firewall/NSG blocking) | ❌ Critical |
 | `CONNECTIVITY_API_SERVER_FAILURE` | API server connectivity test failed | ❌ Critical |
 | `PDNS_DNS_HOST_VNET_LINK_MISSING` | DNS server in peered VNet not linked to private DNS zone | ❌ Critical |
@@ -161,9 +123,10 @@ python3 aks-net-diagnostics.py -n cluster -g rg --subscription "12345678-1234-12
 - ✅ **Network Topology**: VNets, subnets, peerings, DNS configuration
 - ✅ **Outbound Connectivity**: Load balancers, NAT gateways, public IP prefixes, effective public IPs
 - ✅ **UDR Analysis**: Route tables, virtual appliance detection, traffic impact assessment, conflict detection
+- ✅ **NSG Analysis**: Network Security Groups on subnets and NICs, rule compliance, blocking rule detection
 - ✅ **API Server Security**: Authorized IP ranges, security validation, outbound IP authorization
 - ✅ **Private DNS**: Zone validation, VNet links, A record verification
-- ✅ **Active Testing**: DNS resolution, HTTPS connectivity, API server access (optional)
+- ✅ **Active Testing**: DNS-first connectivity testing (DNS resolution → HTTPS connectivity, API server access)
 
 ## 📋 Command Line Options
 
@@ -177,42 +140,62 @@ python3 aks-net-diagnostics.py -n cluster -g rg --subscription "12345678-1234-12
 
 ## 🏗️ Real-World Scenarios
 
-### **Scenario 1: NAT Gateway with API Restrictions**
+### **Scenario 1: Healthy Public Cluster**
 
 ```bash
-# Cluster with managed NAT Gateway and authorized IP ranges
-python3 aks-net-diagnostics.py -n aks-managed-natgw-bicep -g aks-managed-natgw-bicep-rg --verbose
+# Standard public cluster with all services working
+python3 aks-net-diagnostics.py -n aks-good-cluster -g aks-good-cluster --probe-test
 ```
 
-**Detects:**
+**Expected Results:**
 
-- ✅ NAT Gateway outbound IP: 4.205.231.XX
-- ✅ Authorized IP range: 100.65.190.XX/32
-- ❌ **Critical**: Outbound IP not in authorized ranges (nodes cannot access API server)
-
-### **Scenario 2: Standard Configuration**
-
-```bash
-# Basic cluster with load balancer outbound, no restrictions
-python3 aks-net-diagnostics.py -n aks-overlay -g aks-overlay-rg
-```
-
-**Detects:**
-
-- ✅ Load Balancer outbound IP: 130.107.45.XX
+- ✅ DNS Resolution tests: All pass (MCR, Azure Management, API Server)
+- ✅ HTTPS Connectivity tests: All pass (proper SSL handshake completion)
+- ✅ Load Balancer outbound IP: 130.107.224.XX
 - ✅ No API server restrictions (unrestricted public access)
-- ℹ️ Consider enabling IP restrictions for enhanced security
+- ✅ No blocking NSG rules detected
 
-### **Scenario 3: UDR with Virtual Appliance**
+### **Scenario 2: Private Cluster with DNS Issues**
 
 ```bash
-# Cluster with Azure Firewall/NVA overriding load balancer
-python3 aks-net-diagnostics.py -n aks-slb-fw -g aks-slb-fw-rg --verbose
+# Private cluster with missing DNS zone links
+python3 aks-net-diagnostics.py -n aks-api-connection -g aks-api-connection-lab1-rg --probe-test
+```
+
+**Detects:**
+
+- ✅ DNS Resolution: MCR and Azure Management pass
+- ❌ **Critical**: API Server DNS resolves to public IP instead of private IP
+- 🚫 **Skipped**: API Server HTTPS test (DNS-first logic skips due to DNS failure)
+- ❌ **Critical**: DNS server in peered VNet not linked to private DNS zone
+- ❌ **Critical**: Private cluster connectivity failure
+
+### **Scenario 3: Azure Firewall/NVA with SSL Inspection**
+
+```bash
+# Cluster with Azure Firewall intercepting SSL traffic
+python3 aks-net-diagnostics.py -n aks-slb-fw -g aks-slb-fw-rg --probe-test --verbose
 ```
 
 **Detects:**
 
 - ⚠️ Load Balancer configured (130.107.205.XX) but not effective
 - ✅ Effective outbound via Virtual Appliance: 10.0.1.4
-- ❌ Default route (0.0.0.0/0) affects all traffic including container registry
-- ⚠️ UDR overrides configured outbound type
+- ✅ DNS Resolution tests: All pass (firewall allows DNS)
+- ❌ **Critical**: HTTPS connectivity tests fail (SSL handshake interrupted)
+- ❌ Error: `ssl routines::unexpected eof while reading` (firewall blocking SSL)
+- ⚠️ Default route (0.0.0.0/0) affects all traffic including container registry
+
+### **Scenario 4: NSG Analysis with Blocking Rules**
+
+```bash
+# Cluster with NSGs potentially blocking traffic
+python3 aks-net-diagnostics.py -n cluster-with-nsgs -g rg --verbose
+```
+
+**Detects:**
+
+- ✅ NSG analysis on subnets and NICs
+- ❌ **Critical**: NSG rules blocking required AKS traffic (if present)
+- ✅ Inter-node communication validation
+- ✅ Deduplication of NSG findings across multiple NICs with same NSG

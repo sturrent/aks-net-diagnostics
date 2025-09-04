@@ -1635,31 +1635,37 @@ EXAMPLES:
         
         self.logger.info(f"Running connectivity tests on VMSS {vmss_name}, instance {instance_id}")
         
-        # Define connectivity tests
-        tests = [
+        # Define connectivity test groups (DNS first, then HTTPS if DNS succeeds)
+        test_groups = [
             {
-                'name': 'DNS Resolution - Microsoft Container Registry',
-                'script': 'nslookup mcr.microsoft.com',
-                'timeout': 10,
-                'expected_keywords': ['Address:', 'mcr.microsoft.com']
+                'service': 'Microsoft Container Registry',
+                'dns_test': {
+                    'name': 'DNS Resolution - Microsoft Container Registry',
+                    'script': 'nslookup mcr.microsoft.com',
+                    'timeout': 10,
+                    'expected_keywords': ['Address:', 'mcr.microsoft.com']
+                },
+                'connectivity_test': {
+                    'name': 'HTTPS Connectivity - Microsoft Container Registry',
+                    'script': 'timeout 10 curl -v --insecure --proxy-insecure https://mcr.microsoft.com/v2/',
+                    'timeout': 15,
+                    'expected_keywords': ['HTTP/', 'Connected to']
+                }
             },
             {
-                'name': 'HTTPS Connectivity - Microsoft Container Registry',
-                'script': 'curl -kv --connect-timeout 5 --max-time 10 https://mcr.microsoft.com',
-                'timeout': 15,
-                'expected_keywords': ['HTTP/', 'Connected to']
-            },
-            {
-                'name': 'DNS Resolution - Azure Management',
-                'script': 'nslookup management.azure.com',
-                'timeout': 10,
-                'expected_keywords': ['Address:', 'management.azure.com']
-            },
-            {
-                'name': 'HTTPS Connectivity - Azure Management',
-                'script': 'curl -kv --connect-timeout 5 --max-time 10 https://management.azure.com',
-                'timeout': 15,
-                'expected_keywords': ['HTTP/', 'Connected to']
+                'service': 'Azure Management',
+                'dns_test': {
+                    'name': 'DNS Resolution - Azure Management',
+                    'script': 'nslookup management.azure.com',
+                    'timeout': 10,
+                    'expected_keywords': ['Address:', 'management.azure.com']
+                },
+                'connectivity_test': {
+                    'name': 'HTTPS Connectivity - Azure Management',
+                    'script': 'timeout 10 curl -v --insecure --proxy-insecure https://management.azure.com',
+                    'timeout': 15,
+                    'expected_keywords': ['HTTP/', 'Connected to']
+                }
             }
         ]
         
@@ -1669,35 +1675,78 @@ EXAMPLES:
             # Extract hostname from URL for DNS resolution test
             api_hostname = api_server_fqdn.replace('https://', '').replace('http://', '')
             
-            tests.append({
-                'name': f'API Server Connectivity - {api_server_fqdn}',
-                'script': f'curl -kv --connect-timeout 5 --max-time 10 {api_server_fqdn}',
-                'timeout': 15,
-                'expected_keywords': ['Connected to', 'HTTP/']
-            })
-            
             # For private clusters, we need to validate that DNS returns a private IP
             is_private_cluster = self._is_private_cluster()
             if is_private_cluster:
-                tests.append({
+                dns_test = {
                     'name': f'DNS Resolution - API Server (Private)',
                     'script': f'nslookup {api_hostname}',
                     'timeout': 15,  # Reduced timeout for DNS tests
                     'expected_keywords': ['Address:', api_hostname.split('.')[0]],
                     'validate_private_ip': True,  # Special flag for private IP validation
                     'hostname': api_hostname
-                })
+                }
             else:
-                tests.append({
+                dns_test = {
                     'name': f'DNS Resolution - API Server',
                     'script': f'nslookup {api_hostname}',
                     'timeout': 10,
                     'expected_keywords': ['Address:', api_hostname.split('.')[0]]
-                })
+                }
+            
+            # Use AKS node provisioning style API server test with proper cert validation
+            # For private clusters, use the hostname:port format; for public clusters, use the full URL
+            if is_private_cluster:
+                api_connectivity_script = f'timeout 10 curl -v --cacert /etc/kubernetes/certs/ca.crt https://{api_hostname}:443'
+            else:
+                api_connectivity_script = f'timeout 10 curl -v --cacert /etc/kubernetes/certs/ca.crt {api_server_fqdn}:443'
+            
+            api_test_group = {
+                'service': 'API Server',
+                'dns_test': dns_test,
+                'connectivity_test': {
+                    'name': f'API Server Connectivity - {api_server_fqdn}',
+                    'script': api_connectivity_script,
+                    'timeout': 15,
+                    'expected_keywords': ['Connected to', 'HTTP/']
+                }
+            }
+            test_groups.append(api_test_group)
         
-        # Execute each test
-        for test in tests:
-            self._execute_vmss_test(vmss_info, test)
+        # Execute test groups with DNS-first logic
+        for group in test_groups:
+            service_name = group['service']
+            
+            # Always run DNS test first
+            self.logger.info(f"  Testing {service_name} - DNS Resolution")
+            dns_result = self._execute_vmss_test(vmss_info, group['dns_test'])
+            
+            # Only run connectivity test if DNS succeeded
+            if dns_result and dns_result.get('status') == 'passed':
+                self.logger.info(f"  Testing {service_name} - HTTPS Connectivity")
+                self._execute_vmss_test(vmss_info, group['connectivity_test'])
+            else:
+                # DNS failed, skip connectivity test and log why
+                self.logger.info(f"  Skipping {service_name} HTTPS test - DNS resolution failed")
+                
+                # Create a skipped test result for the connectivity test
+                skipped_result = {
+                    'test_name': group['connectivity_test']['name'],
+                    'vmss_name': vmss_info['vmss_name'],
+                    'instance_id': vmss_info['instance_id'],
+                    'status': 'skipped',
+                    'exit_code': -1,
+                    'output': '',
+                    'stderr': '',
+                    'error': f"Skipped due to DNS resolution failure for {service_name}",
+                    'execution_time': 0,
+                    'analysis': f"Test skipped because DNS resolution for {service_name} failed"
+                }
+                
+                # Add to test results
+                if 'tests' not in self.api_probe_results:
+                    self.api_probe_results['tests'] = []
+                self.api_probe_results['tests'].append(skipped_result)
     
     def _get_api_server_fqdn(self):
         """Get the API server FQDN for testing"""
@@ -1793,6 +1842,8 @@ EXAMPLES:
             else:
                 self.api_probe_results['summary']['errors'] += 1
                 self.logger.info(f"    ⚠️ ERROR: {test['name']} - {test_result.get('error', 'Execution error')}")
+            
+            return test_result
                 
         except Exception as e:
             error_result = {
@@ -1806,6 +1857,9 @@ EXAMPLES:
             }
             self.api_probe_results['tests'].append(error_result)
             self.api_probe_results['summary']['total_tests'] += 1
+            self.api_probe_results['summary']['errors'] += 1
+            self.logger.info(f"    ⚠️ ERROR: {test['name']} - {str(e)}")
+            return error_result
             self.api_probe_results['summary']['errors'] += 1
             self.logger.info(f"    ⚠️ ERROR: {test['name']} - {str(e)}")
     
@@ -2017,18 +2071,46 @@ EXAMPLES:
         # Convert \\n back to actual newlines for pattern matching
         combined_output = combined_output.replace('\\n', '\n')
         
+        # First, check for clear failure indicators that should always result in failure
+        critical_failure_indicators = [
+            'connection refused',
+            'connection timed out', 
+            'could not resolve host',
+            'network is unreachable',
+            'ssl routines::unexpected eof while reading',  # SSL handshake interrupted (firewall/proxy)
+            'ssl connect error',
+            'certificate verify failed',
+            'operation timed out',
+            'recv failure: connection reset by peer'
+        ]
+        
+        has_critical_failure = any(indicator in combined_output for indicator in critical_failure_indicators)
+        if has_critical_failure:
+            return False
+        
+        # If exit code is non-zero, generally means failure unless we have specific exceptions
+        if exit_code != 0:
+            # Only allow non-zero exit codes if we have a complete HTTP response
+            if not any(indicator in combined_output for indicator in ['http/1.1', 'http/2', 'http/1.0']):
+                return False
+        
         # Check for successful connection indicators
         connection_indicators = [
             'connected to',           # TCP connection established
+        ]
+        
+        # Check for successful HTTP response indicators  
+        http_response_indicators = [
             'http/1.1',              # HTTP/1.1 response
             'http/2',                # HTTP/2 response  
             'http/1.0'               # HTTP/1.0 response
         ]
         
-        # Check if we successfully connected and got an HTTP response
+        # We need BOTH a connection AND a valid HTTP response for success
         has_connection = any(indicator in combined_output for indicator in connection_indicators)
+        has_http_response = any(indicator in combined_output for indicator in http_response_indicators)
         
-        if has_connection:
+        if has_connection and has_http_response:
             # For specific services, certain HTTP status codes are expected and should be considered success
             
             # Microsoft Container Registry: 400 responses are normal for GET requests without parameters
@@ -2048,10 +2130,9 @@ EXAMPLES:
                 if any(status in combined_output for status in ['http/2 401', 'http/2 403', 'http/1.1 401', 'http/1.1 403']):
                     return True
             
-            # Generic success: any HTTP response indicates successful connectivity
-            # Even error responses (4xx, 5xx) mean we connected successfully
+            # Generic success: any complete HTTP response indicates successful connectivity
+            # Even error responses (4xx, 5xx) mean we connected successfully and completed the SSL handshake
             http_response_patterns = [
-                'http/1.1 ', 'http/2 ', 'http/1.0 ',  # Any HTTP response
                 'content-length:', 'content-type:',    # Response headers
                 'x-ms-', 'server:'                     # Common response headers
             ]
@@ -2059,26 +2140,11 @@ EXAMPLES:
             if any(pattern in combined_output for pattern in http_response_patterns):
                 return True
         
-        # Check for clear failure indicators
-        failure_indicators = [
-            'connection refused',
-            'connection timed out', 
-            'could not resolve host',
-            'network is unreachable',
-            'ssl connect error',
-            'certificate verify failed'
-        ]
+        # If we only have connection but no HTTP response, it's likely a firewall/proxy issue
+        if has_connection and not has_http_response:
+            return False
         
-        has_failure = any(indicator in combined_output for indicator in failure_indicators)
-        
-        # If we have connection indicators but no clear failures, consider it success
-        if has_connection and not has_failure:
-            return True
-        
-        # If exit code is 0 and we have connection indicators, it's likely successful
-        if exit_code == 0 and has_connection:
-            return True
-        
+        # No connection established
         return False
     
     def _check_expected_output(self, output, expected_keywords):
