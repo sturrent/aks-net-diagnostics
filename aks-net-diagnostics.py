@@ -2255,12 +2255,25 @@ EXAMPLES:
         # Check cluster operational state
         provisioning_state = self.cluster_info.get('provisioningState', '')
         if provisioning_state.lower() == 'failed':
-            findings.append({
-                "severity": "critical",
-                "code": "CLUSTER_OPERATION_FAILURE", 
-                "message": f"Cluster failed with error: Failed (Operation: Microsoft.ContainerService/managedClusters/stop/action)",
-                "recommendation": "Check Azure Activity Log for detailed failure information and contact Azure support if needed"
-            })
+            # Try to get detailed error information from cluster status
+            error_info = self._get_cluster_status_error()
+            
+            if error_info:
+                error_code, detailed_error = error_info
+                findings.append({
+                    "severity": "critical",
+                    "code": "CLUSTER_OPERATION_FAILURE", 
+                    "message": f"Cluster failed with error: {detailed_error}",
+                    "error_code": error_code,  # Store the short error code for non-verbose display
+                    "recommendation": "Check Azure Activity Log for detailed failure information and contact Azure support if needed"
+                })
+            else:
+                findings.append({
+                    "severity": "critical",
+                    "code": "CLUSTER_OPERATION_FAILURE", 
+                    "message": f"Cluster failed with error: Failed (Operation: Microsoft.ContainerService/managedClusters/stop/action)",
+                    "recommendation": "Check Azure Activity Log for detailed failure information and contact Azure support if needed"
+                })
         
         # Check node pool states
         failed_node_pools = []
@@ -2312,6 +2325,36 @@ EXAMPLES:
         
         self.findings = findings
     
+    def _get_cluster_status_error(self):
+        """Get detailed cluster error information from status field"""
+        try:
+            # Check for status.errordetail in cluster info
+            status = self.cluster_info.get('status', {})
+            if isinstance(status, dict):
+                error_detail = status.get('errordetail', {})
+                if isinstance(error_detail, dict):
+                    # Extract the detailed error message
+                    error_message = error_detail.get('message', '')
+                    error_code = error_detail.get('code', '')
+                    
+                    if error_message:
+                        if error_code:
+                            # Return tuple: (error_code, full_message)
+                            return (error_code, f"{error_code}: {error_message}")
+                        else:
+                            return (None, error_message)
+                
+                # Check for provisioningError as fallback
+                provisioning_error = status.get('provisioningError')
+                if provisioning_error:
+                    return (None, str(provisioning_error))
+            
+            return None
+            
+        except Exception as e:
+            self.logger.info(f"Could not retrieve cluster status error: {e}")
+            return None
+
     def _analyze_private_dns_issues(self, findings):
         """Analyze private DNS configuration issues"""
         if not self.private_dns_analysis:
@@ -2932,8 +2975,12 @@ EXAMPLES:
         else:
             # Show critical/error findings
             for finding in critical_findings:
-                message = finding.get('message', 'Unknown issue')
-                print(f"- ❌ {message}")
+                # For cluster operation failures, show only the error code in non-verbose mode
+                if finding.get('code') == 'CLUSTER_OPERATION_FAILURE' and finding.get('error_code'):
+                    print(f"- ❌ Cluster failed with error: {finding.get('error_code')}")
+                else:
+                    message = finding.get('message', 'Unknown issue')
+                    print(f"- ❌ {message}")
             
             # Show warning findings
             for finding in warning_findings:
