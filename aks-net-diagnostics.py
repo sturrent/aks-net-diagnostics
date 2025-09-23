@@ -1297,8 +1297,11 @@ EXAMPLES:
             nsg_name = nsg.get("nsgName", "unknown")
             all_rules = nsg.get("rules", []) + nsg.get("defaultRules", [])
             
+            # Sort rules by priority for proper precedence analysis
+            sorted_rules = sorted(all_rules, key=lambda x: x.get('priority', 65000))
+            
             # Check for rules that might block required AKS traffic
-            for rule in all_rules:
+            for rule in sorted_rules:
                 if rule.get('access', '').lower() == 'deny' and rule.get('priority', 0) < 65000:
                     # Check if this rule could block required AKS outbound traffic
                     if rule.get('direction', '').lower() == 'outbound':
@@ -1309,7 +1312,12 @@ EXAMPLES:
                         # Check for rules that could block essential AKS traffic
                         if (dest in ['*', 'Internet'] or 'MicrosoftContainerRegistry' in str(dest) or 'AzureCloud' in str(dest)):
                             if ('443' in str(ports) or '*' in str(ports)) and protocol.upper() in ['TCP', '*']:
-                                blocking_rules.append({
+                                # Check if there are higher priority allow rules that would override this deny rule
+                                is_overridden, overriding_rules = self._check_rule_precedence(
+                                    rule, sorted_rules, nsg_name
+                                )
+                                
+                                blocking_rule = {
                                     "nsgName": nsg_name,
                                     "ruleName": rule.get('name', 'unknown'),
                                     "priority": rule.get('priority', 0),
@@ -1317,11 +1325,94 @@ EXAMPLES:
                                     "protocol": protocol,
                                     "destination": dest,
                                     "ports": ports,
-                                    "impact": "Could block AKS management traffic"
-                                })
+                                    "impact": "Could block AKS management traffic",
+                                    "isOverridden": is_overridden,
+                                    "overriddenBy": overriding_rules,
+                                    "effectiveSeverity": "warning" if is_overridden else "critical"
+                                }
+                                
+                                blocking_rules.append(blocking_rule)
         
         self.nsg_analysis["blockingRules"] = blocking_rules
         self.nsg_analysis["missingRules"] = missing_rules
+    
+    def _check_rule_precedence(self, deny_rule, sorted_rules, nsg_name):
+        """Check if a deny rule is overridden by higher priority allow rules"""
+        deny_priority = deny_rule.get('priority', 65000)
+        overriding_rules = []
+        
+        # Look for allow rules with higher priority (lower number) that would override this deny rule
+        for rule in sorted_rules:
+            rule_priority = rule.get('priority', 65000)
+            
+            # Only check rules with higher priority (lower priority number)
+            if rule_priority >= deny_priority:
+                break
+                
+            # Only check allow rules in the same direction
+            if (rule.get('access', '').lower() == 'allow' and 
+                rule.get('direction', '').lower() == deny_rule.get('direction', '').lower()):
+                
+                # Check if this allow rule covers the same traffic as the deny rule
+                if self._rules_overlap(deny_rule, rule):
+                    overriding_rules.append({
+                        "ruleName": rule.get('name', 'unknown'),
+                        "priority": rule_priority,
+                        "destination": rule.get('destinationAddressPrefix', ''),
+                        "ports": rule.get('destinationPortRange', ''),
+                        "protocol": rule.get('protocol', '')
+                    })
+        
+        is_overridden = len(overriding_rules) > 0
+        return is_overridden, overriding_rules
+    
+    def _rules_overlap(self, deny_rule, allow_rule):
+        """Check if an allow rule overlaps with a deny rule for AKS traffic"""
+        # Check destination overlap
+        deny_dest = deny_rule.get('destinationAddressPrefix', '').lower()
+        allow_dest = allow_rule.get('destinationAddressPrefix', '').lower()
+        
+        # Check if allow rule covers AKS-related destinations
+        aks_destinations = ['*', 'internet', 'azurecloud', 'microsoftcontainerregistry']
+        
+        dest_overlap = False
+        if allow_dest in aks_destinations:
+            dest_overlap = True
+        elif deny_dest in ['*', 'internet'] and allow_dest in ['azurecloud', 'microsoftcontainerregistry']:
+            dest_overlap = True
+        elif deny_dest in aks_destinations and allow_dest == deny_dest:
+            dest_overlap = True
+        
+        if not dest_overlap:
+            return False
+        
+        # Check port overlap
+        deny_ports = str(deny_rule.get('destinationPortRange', '')).lower()
+        allow_ports = str(allow_rule.get('destinationPortRange', '')).lower()
+        
+        port_overlap = False
+        if allow_ports == '*' or deny_ports == '*':
+            port_overlap = True
+        elif '443' in deny_ports and ('443' in allow_ports or '*' in allow_ports):
+            port_overlap = True
+        elif deny_ports == allow_ports:
+            port_overlap = True
+        
+        if not port_overlap:
+            return False
+        
+        # Check protocol overlap
+        deny_protocol = deny_rule.get('protocol', '').upper()
+        allow_protocol = allow_rule.get('protocol', '').upper()
+        
+        protocol_overlap = (
+            allow_protocol == '*' or 
+            deny_protocol == '*' or 
+            deny_protocol == allow_protocol or
+            (deny_protocol in ['TCP', '*'] and allow_protocol in ['TCP', '*'])
+        )
+        
+        return protocol_overlap
     
     def analyze_private_dns(self):
         """Analyze private DNS configuration"""
@@ -2916,11 +3007,25 @@ EXAMPLES:
         # Check for blocking rules that could affect AKS functionality
         blocking_rules = self.nsg_analysis.get("blockingRules", [])
         for rule in blocking_rules:
+            # Use the effective severity based on rule precedence analysis
+            effective_severity = rule.get("effectiveSeverity", "critical")
+            is_overridden = rule.get("isOverridden", False)
+            overriding_rules = rule.get("overriddenBy", [])
+            
+            # Create appropriate message based on precedence
+            if is_overridden:
+                overriding_rule_names = [r.get('ruleName', 'unknown') for r in overriding_rules[:2]]  # Show first 2
+                message = f"NSG rule '{rule.get('ruleName')}' could block AKS traffic, but higher-priority allow rules override it: {', '.join(overriding_rule_names)}"
+                recommendation = f"Rule is currently ineffective due to higher-priority rules. Consider removing or adjusting priority {rule.get('priority')} for cleaner NSG configuration."
+            else:
+                message = f"NSG rule '{rule.get('ruleName')}' in '{rule.get('nsgName')}' may block AKS traffic"
+                recommendation = f"Review NSG rule priority {rule.get('priority')} - {rule.get('impact', 'Could affect cluster functionality')}"
+            
             findings.append({
-                "severity": "critical",
+                "severity": effective_severity,
                 "code": "NSG_BLOCKING_AKS_TRAFFIC",
-                "message": f"NSG rule '{rule.get('ruleName')}' in '{rule.get('nsgName')}' may block AKS traffic",
-                "recommendation": f"Review NSG rule priority {rule.get('priority')} - {rule.get('impact', 'Could affect cluster functionality')}"
+                "message": message,
+                "recommendation": recommendation
             })
         
         # Check for inter-node communication issues
