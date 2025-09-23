@@ -3,18 +3,31 @@
 AKS Network Diagnostics Script
 Comprehensive read-only analysis of AKS cluster network configuration
 Author: Azure Networking Diagnostics Generator
-Version: 2.0
+Version: 2.1
 """
 
 import argparse
 import json
-import subprocess
-import sys
+import logging
 import os
 import re
+import stat
+import subprocess
+import sys
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
-import logging
+
+# Configuration constants
+SCRIPT_VERSION = "2.1"
+MAX_FILENAME_LENGTH = 50
+MAX_RESOURCE_NAME_LENGTH = 260
+VMSS_COMMAND_TIMEOUT = 60
+DEFAULT_FILE_PERMISSIONS = 0o600  # Owner read/write only (octal notation)
+
+# Allowed Azure CLI commands for security validation
+ALLOWED_AZ_COMMANDS = {
+    'account', 'aks', 'network', 'vmss', 'vm'
+}
 
 class AKSNetworkDiagnostics:
     """Main class for AKS network diagnostics"""
@@ -47,11 +60,37 @@ class AKSNetworkDiagnostics:
         self.findings: List[Dict[str, Any]] = []
         
         # Setup logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(message)s'
-        )
+        self._setup_logging()
         self.logger = logging.getLogger(__name__)
+    
+    def _setup_logging(self):
+        """Configure logging with appropriate handlers and formatters"""
+        # Create formatter
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # Configure root logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+        
+        # Remove existing handlers to avoid duplicates
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        
+        # Add console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+        
+        # Optionally add file handler for debugging
+        if os.environ.get('AKS_DIAGNOSTICS_DEBUG', '').lower() == 'true':
+            file_handler = logging.FileHandler('aks-diagnostics-debug.log')
+            file_handler.setFormatter(formatter)
+            file_handler.setLevel(logging.DEBUG)
+            root_logger.addHandler(file_handler)
+            root_logger.setLevel(logging.DEBUG)
     
     def parse_arguments(self):
         """Parse command line arguments"""
@@ -89,9 +128,16 @@ EXAMPLES:
         
         args = parser.parse_args()
         
-        self.aks_name = args.name
-        self.aks_rg = args.resource_group
-        self.subscription = args.subscription
+        # Validate required arguments
+        self.aks_name = self._validate_resource_name(args.name, "cluster name")
+        self.aks_rg = self._validate_resource_name(args.resource_group, "resource group")
+        
+        # Validate optional arguments
+        if args.subscription:
+            self.subscription = self._validate_subscription_id(args.subscription)
+        else:
+            self.subscription = None
+            
         self.probe_test = args.probe_test
         self.json_out = args.json_out
         self.no_json = args.no_json
@@ -101,10 +147,113 @@ EXAMPLES:
         # Auto-generate JSON filename if not disabled and not specified
         if not self.no_json and not self.json_out:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.json_out = f"aks-net-diagnostics_{self.aks_name}_{timestamp}.json"
+            # Sanitize cluster name for filename
+            safe_cluster_name = self._sanitize_filename(self.aks_name)
+            self.json_out = f"aks-net-diagnostics_{safe_cluster_name}_{timestamp}.json"
+        elif self.json_out:
+            # Validate user-provided filename
+            self.json_out = self._validate_output_path(self.json_out)
+    
+    def _validate_azure_cli_command(self, cmd: List[str]) -> None:
+        """Validate Azure CLI command to prevent injection attacks"""
+        if not cmd or not isinstance(cmd, list):
+            raise ValueError("Command must be a non-empty list")
+        
+        # Check if the first argument is an allowed command
+        if cmd[0] not in ALLOWED_AZ_COMMANDS:
+            raise ValueError(f"Command '{cmd[0]}' is not allowed")
+        
+        # Validate that arguments don't contain shell metacharacters
+        dangerous_chars = ['|', '&', ';', '(', ')', '$', '`', '\\', '"', "'", '<', '>']
+        for arg in cmd:
+            if any(char in str(arg) for char in dangerous_chars):
+                # Allow some safe characters in specific contexts
+                if not self._is_safe_argument(str(arg)):
+                    raise ValueError(f"Command argument contains potentially dangerous characters: {arg}")
+    
+    def _is_safe_argument(self, arg: str) -> bool:
+        """Check if an argument with special characters is safe"""
+        # Allow Azure resource IDs which contain forward slashes
+        if arg.startswith('/subscriptions/'):
+            return True
+        # Allow JSON queries which might contain quotes
+        if arg.startswith('[') and arg.endswith(']'):
+            return True
+        # Allow other safe patterns as needed
+        return False
+    
+    def _sanitize_filename(self, filename: str) -> str:
+        """Sanitize filename to prevent path traversal and invalid characters"""
+        # Remove path separators and other dangerous characters
+        dangerous_chars = ['/', '\\', '..', '<', '>', ':', '"', '|', '?', '*']
+        sanitized = filename
+        for char in dangerous_chars:
+            sanitized = sanitized.replace(char, '_')
+        
+        # Limit length and ensure it's not empty
+        sanitized = sanitized[:MAX_FILENAME_LENGTH].strip()
+        if not sanitized:
+            sanitized = "unknown"
+        
+        return sanitized
+    
+    def _validate_output_path(self, filepath: str) -> str:
+        """Validate and sanitize output file path"""
+        # Resolve the path to prevent traversal attacks
+        resolved_path = os.path.abspath(filepath)
+        
+        # Ensure the path is within the current directory or its subdirectories
+        current_dir = os.path.abspath('.')
+        if not resolved_path.startswith(current_dir):
+            raise ValueError("Output file path must be within the current directory")
+        
+        # Ensure the filename has a safe extension
+        if not resolved_path.lower().endswith('.json'):
+            resolved_path += '.json'
+        
+        return resolved_path
+    
+    def _validate_resource_name(self, name: str, resource_type: str) -> str:
+        """Validate Azure resource name"""
+        if not name or not isinstance(name, str):
+            raise ValueError(f"{resource_type.capitalize()} cannot be empty")
+        
+        # Remove leading/trailing whitespace
+        name = name.strip()
+        
+        # Basic length validation
+        if len(name) < 1 or len(name) > MAX_RESOURCE_NAME_LENGTH:
+            raise ValueError(f"{resource_type.capitalize()} must be between 1 and 260 characters")
+        
+        # Check for obviously malicious patterns
+        dangerous_patterns = ['../', '\\', '<script>', 'javascript:', 'data:']
+        for pattern in dangerous_patterns:
+            if pattern.lower() in name.lower():
+                raise ValueError(f"{resource_type.capitalize()} contains invalid characters")
+        
+        return name
+    
+    def _validate_subscription_id(self, subscription_id: str) -> str:
+        """Validate Azure subscription ID format"""
+        if not subscription_id:
+            raise ValueError("Subscription ID cannot be empty")
+        
+        # Basic GUID format validation (loose)
+        import re
+        guid_pattern = r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        
+        if not re.match(guid_pattern, subscription_id):
+            # Allow subscription names as well, not just GUIDs
+            if len(subscription_id) < 1 or len(subscription_id) > 100:
+                raise ValueError("Invalid subscription ID format")
+        
+        return subscription_id
     
     def run_azure_cli(self, cmd: List[str], expect_json: bool = True) -> Any:
         """Run Azure CLI command and return result"""
+        # Validate command arguments to prevent injection
+        self._validate_azure_cli_command(cmd)
+        
         cmd_str = ' '.join(cmd)
         
         # Check cache first
@@ -148,15 +297,13 @@ EXAMPLES:
         try:
             subprocess.run(['az', '--version'], capture_output=True, check=True)
         except (subprocess.CalledProcessError, FileNotFoundError):
-            self.logger.error("Azure CLI is not installed or not in PATH")
-            sys.exit(1)
+            raise FileNotFoundError("Azure CLI is not installed or not in PATH")
         
         # Check if logged in
         try:
             subprocess.run(['az', 'account', 'show'], capture_output=True, check=True)
         except subprocess.CalledProcessError:
-            self.logger.error("Not logged in to Azure. Run 'az login' first.")
-            sys.exit(1)
+            raise PermissionError("Not logged in to Azure. Run 'az login' first.")
         
         # Set subscription if provided
         if self.subscription:
@@ -165,8 +312,7 @@ EXAMPLES:
                              capture_output=True, check=True)
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
             except subprocess.CalledProcessError:
-                self.logger.error(f"Failed to set subscription: {self.subscription}")
-                sys.exit(1)
+                raise ValueError(f"Failed to set subscription: {self.subscription}")
         else:
             # Get current subscription
             current_sub = self.run_azure_cli(['account', 'show', '--query', 'id', '-o', 'tsv'], expect_json=False)
@@ -183,8 +329,7 @@ EXAMPLES:
         cluster_result = self.run_azure_cli(cluster_cmd)
         
         if not cluster_result or not isinstance(cluster_result, dict):
-            self.logger.error(f"Failed to get cluster information for {self.aks_name}")
-            sys.exit(1)
+            raise ValueError(f"Failed to get cluster information for {self.aks_name}. Please check the cluster name and resource group.")
         
         self.cluster_info = cluster_result
         
@@ -1872,7 +2017,7 @@ EXAMPLES:
                 ['az'] + cmd,
                 capture_output=True,
                 text=True,
-                timeout=60  # 60 second timeout for VMSS commands
+                timeout=VMSS_COMMAND_TIMEOUT
             )
             
             output = result.stdout.strip()
@@ -1895,7 +2040,7 @@ EXAMPLES:
                 
         except subprocess.TimeoutExpired:
             return {
-                "error": "VMSS command timed out after 60 seconds",
+                "error": f"VMSS command timed out after {VMSS_COMMAND_TIMEOUT} seconds",
                 "stderr": "Command execution timeout - This often indicates DNS resolution failure for private clusters with missing private DNS zone links"
             }
         except subprocess.CalledProcessError as e:
@@ -2188,7 +2333,11 @@ EXAMPLES:
             output_to_parse = nslookup_output.replace('\\n', '\n')
             
             # Check for DNS resolution failures first
-            if any(error in output_to_parse.lower() for error in ['nxdomain', 'servfail', 'refused', "can't find"]):
+            dns_error_patterns = [
+                'nxdomain', 'servfail', 'refused', "can't find", 
+                'no servers could be reached', 'communications error', 'timed out'
+            ]
+            if any(error in output_to_parse.lower() for error in dns_error_patterns):
                 return False  # DNS resolution failed completely
             
             # Parse nslookup output to extract IP addresses
@@ -2226,8 +2375,13 @@ EXAMPLES:
             return False
             
         except Exception as e:
-            # If we can't parse the output, fall back to checking for resolution errors
-            return not any(error in nslookup_output.lower() for error in ['nxdomain', 'servfail', 'refused', "can't find"])
+            # If we can't parse the output, be conservative and check for any error indicators
+            dns_error_patterns = [
+                'nxdomain', 'servfail', 'refused', "can't find", 
+                'no servers could be reached', 'communications error', 'timed out'
+            ]
+            # Return False if any error patterns are found, True only if none are found
+            return not any(error in nslookup_output.lower() for error in dns_error_patterns)
     
     def analyze_misconfigurations(self):
         """Analyze potential misconfigurations and failures"""
@@ -2897,8 +3051,13 @@ EXAMPLES:
         # Output JSON report if not disabled
         if not self.no_json and self.json_out:
             try:
+                # Create file with secure permissions (owner read/write only)
+                import stat
                 with open(self.json_out, 'w') as f:
                     json.dump(report_data, f, indent=2)
+                
+                # Set secure file permissions (readable/writable by owner only)
+                os.chmod(self.json_out, DEFAULT_FILE_PERMISSIONS)
                 self.logger.info(f"📄 JSON report saved to: {self.json_out}")
             except Exception as e:
                 self.logger.error(f"Failed to save JSON report: {e}")
@@ -3370,15 +3529,30 @@ EXAMPLES:
 
 def main():
     """Main entry point"""
+    exit_code = 0
     try:
         diagnostics = AKSNetworkDiagnostics()
         diagnostics.run()
     except KeyboardInterrupt:
         print("\n\nOperation cancelled by user.")
-        sys.exit(1)
+        exit_code = 130  # Standard exit code for SIGINT
+    except ValueError as e:
+        print(f"\nConfiguration Error: {e}")
+        exit_code = 2
+    except FileNotFoundError as e:
+        print(f"\nFile Error: {e}")
+        exit_code = 3
+    except PermissionError as e:
+        print(f"\nPermission Error: {e}")
+        exit_code = 4
     except Exception as e:
-        print(f"\nError: {e}")
-        sys.exit(1)
+        print(f"\nUnexpected Error: {e}")
+        # In verbose mode or debug, show stack trace
+        import traceback
+        traceback.print_exc()
+        exit_code = 1
+    finally:
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":
