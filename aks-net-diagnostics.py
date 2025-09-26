@@ -15,6 +15,7 @@ import stat
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
 # Configuration constants
@@ -22,6 +23,7 @@ SCRIPT_VERSION = "2.1"
 MAX_FILENAME_LENGTH = 50
 MAX_RESOURCE_NAME_LENGTH = 260
 VMSS_COMMAND_TIMEOUT = 60
+AZURE_CLI_TIMEOUT = 90
 DEFAULT_FILE_PERMISSIONS = 0o600  # Owner read/write only (octal notation)
 
 # Allowed Azure CLI commands for security validation
@@ -60,8 +62,7 @@ class AKSNetworkDiagnostics:
         self.findings: List[Dict[str, Any]] = []
         
         # Setup logging
-        self._setup_logging()
-        self.logger = logging.getLogger(__name__)
+        self.logger = self._setup_logging()
     
     def _setup_logging(self):
         """Configure logging with appropriate handlers and formatters"""
@@ -71,26 +72,28 @@ class AKSNetworkDiagnostics:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         
-        # Configure root logger
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
+        logger = logging.getLogger("aks_net_diagnostics")
+        logger.propagate = False
         
-        # Remove existing handlers to avoid duplicates
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
+        if not logger.handlers:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
         
-        # Add console handler
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        root_logger.addHandler(console_handler)
+        logger.setLevel(logging.INFO)
         
         # Optionally add file handler for debugging
-        if os.environ.get('AKS_DIAGNOSTICS_DEBUG', '').lower() == 'true':
+        if os.environ.get('AKS_DIAGNOSTICS_DEBUG', '').lower() == 'true' and not any(
+            isinstance(handler, logging.FileHandler) and handler.baseFilename.endswith('aks-diagnostics-debug.log')
+            for handler in logger.handlers
+        ):
             file_handler = logging.FileHandler('aks-diagnostics-debug.log')
             file_handler.setFormatter(formatter)
             file_handler.setLevel(logging.DEBUG)
-            root_logger.addHandler(file_handler)
-            root_logger.setLevel(logging.DEBUG)
+            logger.addHandler(file_handler)
+            logger.setLevel(logging.DEBUG)
+
+        return logger
     
     def parse_arguments(self):
         """Parse command line arguments"""
@@ -200,18 +203,19 @@ EXAMPLES:
     def _validate_output_path(self, filepath: str) -> str:
         """Validate and sanitize output file path"""
         # Resolve the path to prevent traversal attacks
-        resolved_path = os.path.abspath(filepath)
-        
-        # Ensure the path is within the current directory or its subdirectories
-        current_dir = os.path.abspath('.')
-        if not resolved_path.startswith(current_dir):
+        resolved_path = Path(filepath).expanduser().resolve()
+        current_dir = Path.cwd().resolve()
+
+        try:
+            resolved_path.relative_to(current_dir)
+        except ValueError:
             raise ValueError("Output file path must be within the current directory")
         
         # Ensure the filename has a safe extension
-        if not resolved_path.lower().endswith('.json'):
-            resolved_path += '.json'
+        if not str(resolved_path).lower().endswith('.json'):
+            resolved_path = resolved_path.with_suffix('.json')
         
-        return resolved_path
+        return str(resolved_path)
     
     def _validate_resource_name(self, name: str, resource_type: str) -> str:
         """Validate Azure resource name"""
@@ -265,7 +269,8 @@ EXAMPLES:
                 ['az'] + cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=AZURE_CLI_TIMEOUT
             )
             
             output = result.stdout.strip()
@@ -285,23 +290,30 @@ EXAMPLES:
             else:
                 return output
             
+        except subprocess.TimeoutExpired as e:
+            self.logger.error(f"Azure CLI command timed out after {AZURE_CLI_TIMEOUT}s: {cmd_str}")
+            raise RuntimeError(f"Azure CLI command timed out: {cmd_str}") from e
         except subprocess.CalledProcessError as e:
+            stderr_output = e.stderr.strip() if e.stderr else ''
+            stdout_output = e.stdout.strip() if e.stdout else ''
             self.logger.error(f"Azure CLI command failed: {cmd_str}")
-            if e.stderr:
-                self.logger.error(f"Error: {e.stderr}")
-            return {} if expect_json else ""
+            if stderr_output:
+                self.logger.error(f"Error: {stderr_output}")
+            elif stdout_output:
+                self.logger.error(f"Output: {stdout_output}")
+            raise RuntimeError(f"Azure CLI command failed: {cmd_str}") from e
     
     def check_prerequisites(self):
         """Check if required tools are available"""
         # Check Azure CLI
         try:
-            subprocess.run(['az', '--version'], capture_output=True, check=True)
+            subprocess.run(['az', '--version'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT)
         except (subprocess.CalledProcessError, FileNotFoundError):
             raise FileNotFoundError("Azure CLI is not installed or not in PATH")
         
         # Check if logged in
         try:
-            subprocess.run(['az', 'account', 'show'], capture_output=True, check=True)
+            subprocess.run(['az', 'account', 'show'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT)
         except subprocess.CalledProcessError:
             raise PermissionError("Not logged in to Azure. Run 'az login' first.")
         
@@ -309,7 +321,7 @@ EXAMPLES:
         if self.subscription:
             try:
                 subprocess.run(['az', 'account', 'set', '--subscription', self.subscription], 
-                             capture_output=True, check=True)
+                             capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT)
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
             except subprocess.CalledProcessError:
                 raise ValueError(f"Failed to set subscription: {self.subscription}")
@@ -2040,20 +2052,17 @@ EXAMPLES:
             self.logger.info(f"  Running test: {test['name']}")
             
             # Build the run-command
-            cmd = [
-                'vmss', 'run-command', 'invoke',
-                '--subscription', self.subscription or '',
+            cmd = ['vmss', 'run-command', 'invoke']
+            if self.subscription:
+                cmd.extend(['--subscription', self.subscription])
+            cmd.extend([
                 '-g', resource_group,
                 '-n', vmss_name,
                 '--command-id', 'RunShellScript',
                 '--instance-id', instance_id,
                 '--scripts', test['script'],
                 '-o', 'json'
-            ]
-            
-            # Remove empty subscription if not provided
-            if not self.subscription:
-                cmd = cmd[3:]  # Remove --subscription and empty value
+            ])
             
             # Execute the command with timeout - use special handling for VMSS commands
             result = self._run_vmss_command(cmd)
@@ -2096,8 +2105,6 @@ EXAMPLES:
             self.api_probe_results['summary']['errors'] += 1
             self.logger.info(f"    ⚠️ ERROR: {test['name']} - {str(e)}")
             return error_result
-            self.api_probe_results['summary']['errors'] += 1
-            self.logger.info(f"    ⚠️ ERROR: {test['name']} - {str(e)}")
     
     def _run_vmss_command(self, cmd: List[str]) -> Any:
         """Run VMSS command with enhanced error handling"""
@@ -3118,7 +3125,7 @@ EXAMPLES:
         report_data = {
             "metadata": {
                 "timestamp": datetime.utcnow().isoformat() + "Z",
-                "version": "2.0",
+                "version": SCRIPT_VERSION,
                 "generatedBy": "AKS Network Diagnostics Script (Python)"
             },
             "cluster": {
