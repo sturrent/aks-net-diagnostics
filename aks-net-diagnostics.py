@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -30,6 +31,16 @@ DEFAULT_FILE_PERMISSIONS = 0o600  # Owner read/write only (octal notation)
 ALLOWED_AZ_COMMANDS = {
     'account', 'aks', 'network', 'vmss', 'vm'
 }
+
+
+@dataclass
+class VMSSInstance:
+    """Represents a VMSS instance eligible for connectivity testing."""
+
+    vmss_name: str
+    resource_group: str
+    instance_id: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 class AKSNetworkDiagnostics:
     """Main class for AKS network diagnostics"""
@@ -1775,7 +1786,7 @@ EXAMPLES:
         }
         
         # Get VMSS instances for testing (limited to first available for performance)
-        vmss_instances = self._get_vmss_instances_for_connectivity()
+        vmss_instances = self._list_ready_vmss_instances()
         if not vmss_instances:
             self.logger.info("No VMSS instances found for connectivity testing")
             return
@@ -1785,101 +1796,68 @@ EXAMPLES:
         first_vmss = vmss_instances[0]
         total_vmss_count = len(vmss_instances)
         if total_vmss_count > 1:
-            self.logger.info(f"Found {total_vmss_count} VMSS instance(s). Testing connectivity from the first one: {first_vmss['vmss_name']} (skipping {total_vmss_count - 1} others for performance)")
+            self.logger.info(
+                "Found %s VMSS instance(s). Testing connectivity from the first one: %s (skipping %s others for performance)",
+                total_vmss_count,
+                first_vmss.vmss_name,
+                total_vmss_count - 1,
+            )
         else:
-            self.logger.info(f"Found {total_vmss_count} VMSS instance(s). Testing connectivity from: {first_vmss['vmss_name']}")
+            self.logger.info("Found %s VMSS instance(s). Testing connectivity from: %s", total_vmss_count, first_vmss.vmss_name)
         
         self._run_vmss_connectivity_tests(first_vmss)
     
-    def _get_vmss_instances(self):
-        """Get VMSS instances suitable for connectivity testing"""
-        vmss_instances = []
-        
-        try:
-            # Get managed cluster resource group
-            mc_rg = self.cluster_info.get('nodeResourceGroup', '')
-            if not mc_rg:
-                return vmss_instances
-            
-            # List VMSS in the managed cluster resource group
-            cmd = ['vmss', 'list', '-g', mc_rg, '-o', 'json']
-            vmss_list = self.run_azure_cli(cmd)
-            
-            if isinstance(vmss_list, list):
-                for vmss in vmss_list:
-                    vmss_name = vmss.get('name', '')
-                    if vmss_name:
-                        # Get instances for this VMSS
-                        instances_cmd = ['vmss', 'list-instances', '-g', mc_rg, '-n', vmss_name, '-o', 'json']
-                        instances = self.run_azure_cli(instances_cmd)
-                        
-                        if isinstance(instances, list) and instances:
-                            # Use the first running instance from this VMSS
-                            for instance in instances:
-                                if instance.get('provisioningState') == 'Succeeded':
-                                    vmss_instances.append({
-                                        'vmss_name': vmss_name,
-                                        'resource_group': mc_rg,
-                                        'instance_id': str(instance.get('instanceId', '0')),
-                                        'vmss_info': vmss
-                                    })
-                                    break  # Only need one instance per VMSS
-            
-        except Exception as e:
-            self.logger.info(f"Error getting VMSS instances: {e}")
-        
-        return vmss_instances
+    def _list_ready_vmss_instances(self) -> List[VMSSInstance]:
+        """Return one ready instance per VMSS for connectivity probing."""
+        instances: List[VMSSInstance] = []
+        mc_rg = self.cluster_info.get('nodeResourceGroup', '')
+        if not mc_rg:
+            return instances
 
-    def _get_vmss_instances_for_connectivity(self):
-        """Get VMSS instances for connectivity testing (optimized to return only one)"""
-        vmss_instances = []
-        
         try:
-            # Get managed cluster resource group
-            mc_rg = self.cluster_info.get('nodeResourceGroup', '')
-            if not mc_rg:
-                return vmss_instances
-            
-            # List VMSS in the managed cluster resource group
-            cmd = ['vmss', 'list', '-g', mc_rg, '-o', 'json']
-            vmss_list = self.run_azure_cli(cmd)
-            
-            if isinstance(vmss_list, list):
-                # Collect all VMSS first to report total count
-                all_vmss = []
-                for vmss in vmss_list:
-                    vmss_name = vmss.get('name', '')
-                    if vmss_name:
-                        # Get instances for this VMSS
-                        instances_cmd = ['vmss', 'list-instances', '-g', mc_rg, '-n', vmss_name, '-o', 'json']
-                        instances = self.run_azure_cli(instances_cmd)
-                        
-                        if isinstance(instances, list) and instances:
-                            # Find the first running instance from this VMSS
-                            for instance in instances:
-                                if instance.get('provisioningState') == 'Succeeded':
-                                    vmss_instance = {
-                                        'vmss_name': vmss_name,
-                                        'resource_group': mc_rg,
-                                        'instance_id': str(instance.get('instanceId', '0')),
-                                        'vmss_info': vmss
-                                    }
-                                    all_vmss.append(vmss_instance)
-                                    break  # Only need one instance per VMSS
-                
-                # Return all VMSS for reporting, but connectivity testing will only use the first one
-                vmss_instances = all_vmss
-            
-        except Exception as e:
-            self.logger.info(f"Error getting VMSS instances for connectivity testing: {e}")
-        
-        return vmss_instances
+            vmss_list = self.run_azure_cli(['vmss', 'list', '-g', mc_rg, '-o', 'json'])
+        except RuntimeError as exc:
+            self.logger.info(f"Error listing VMSS in {mc_rg}: {exc}")
+            return instances
+
+        if not isinstance(vmss_list, list):
+            return instances
+
+        for vmss in vmss_list:
+            vmss_name = vmss.get('name')
+            if not vmss_name:
+                continue
+
+            try:
+                vmss_nodes = self.run_azure_cli(['vmss', 'list-instances', '-g', mc_rg, '-n', vmss_name, '-o', 'json'])
+            except RuntimeError as exc:
+                self.logger.info(f"Error listing instances for VMSS {vmss_name}: {exc}")
+                continue
+
+            if not isinstance(vmss_nodes, list):
+                continue
+
+            for node in vmss_nodes:
+                if node.get('provisioningState') != 'Succeeded':
+                    continue
+
+                instances.append(
+                    VMSSInstance(
+                        vmss_name=vmss_name,
+                        resource_group=mc_rg,
+                        instance_id=str(node.get('instanceId', '0')),
+                        metadata={'vmss': vmss, 'instance': node},
+                    )
+                )
+                break  # Only need one ready instance per VMSS
+
+        return instances
     
-    def _run_vmss_connectivity_tests(self, vmss_info):
+    def _run_vmss_connectivity_tests(self, vmss_instance: VMSSInstance):
         """Run connectivity tests on a VMSS instance"""
-        vmss_name = vmss_info['vmss_name']
-        resource_group = vmss_info['resource_group']
-        instance_id = vmss_info['instance_id']
+        vmss_name = vmss_instance.vmss_name
+        resource_group = vmss_instance.resource_group
+        instance_id = vmss_instance.instance_id
         
         self.logger.info(f"Running connectivity tests on VMSS {vmss_name}, instance {instance_id}")
         
@@ -1967,12 +1945,12 @@ EXAMPLES:
             
             # Always run DNS test first
             self.logger.info(f"  Testing {service_name} - DNS Resolution")
-            dns_result = self._execute_vmss_test(vmss_info, group['dns_test'])
+            dns_result = self._execute_vmss_test(vmss_instance, group['dns_test'])
             
             # Only run connectivity test if DNS succeeded
             if dns_result and dns_result.get('status') == 'passed':
                 self.logger.info(f"  Testing {service_name} - HTTPS Connectivity")
-                self._execute_vmss_test(vmss_info, group['connectivity_test'])
+                self._execute_vmss_test(vmss_instance, group['connectivity_test'])
             else:
                 # DNS failed, skip connectivity test and log why
                 self.logger.info(f"  Skipping {service_name} HTTPS test - DNS resolution failed")
@@ -1980,8 +1958,8 @@ EXAMPLES:
                 # Create a skipped test result for the connectivity test
                 skipped_result = {
                     'test_name': group['connectivity_test']['name'],
-                    'vmss_name': vmss_info['vmss_name'],
-                    'instance_id': vmss_info['instance_id'],
+                    'vmss_name': vmss_instance.vmss_name,
+                    'instance_id': vmss_instance.instance_id,
                     'status': 'skipped',
                     'exit_code': -1,
                     'output': '',
@@ -2042,11 +2020,11 @@ EXAMPLES:
         except Exception:
             return False
     
-    def _execute_vmss_test(self, vmss_info, test):
+    def _execute_vmss_test(self, vmss_instance: VMSSInstance, test):
         """Execute a single connectivity test on VMSS instance"""
-        vmss_name = vmss_info['vmss_name']
-        resource_group = vmss_info['resource_group']
-        instance_id = vmss_info['instance_id']
+        vmss_name = vmss_instance.vmss_name
+        resource_group = vmss_instance.resource_group
+        instance_id = vmss_instance.instance_id
         
         try:
             self.logger.info(f"  Running test: {test['name']}")
