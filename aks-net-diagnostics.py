@@ -15,7 +15,7 @@ import stat
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
@@ -281,7 +281,8 @@ EXAMPLES:
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=AZURE_CLI_TIMEOUT
+                timeout=AZURE_CLI_TIMEOUT,
+                shell=True
             )
             
             output = result.stdout.strip()
@@ -318,13 +319,13 @@ EXAMPLES:
         """Check if required tools are available"""
         # Check Azure CLI
         try:
-            subprocess.run(['az', '--version'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT)
+            subprocess.run(['az', '--version'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=True)
         except (subprocess.CalledProcessError, FileNotFoundError):
             raise FileNotFoundError("Azure CLI is not installed or not in PATH")
         
         # Check if logged in
         try:
-            subprocess.run(['az', 'account', 'show'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT)
+            subprocess.run(['az', 'account', 'show'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=True)
         except subprocess.CalledProcessError:
             raise PermissionError("Not logged in to Azure. Run 'az login' first.")
         
@@ -332,7 +333,7 @@ EXAMPLES:
         if self.subscription:
             try:
                 subprocess.run(['az', 'account', 'set', '--subscription', self.subscription], 
-                             capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT)
+                             capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=True)
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
             except subprocess.CalledProcessError:
                 raise ValueError(f"Failed to set subscription: {self.subscription}")
@@ -3102,7 +3103,7 @@ EXAMPLES:
         # Prepare all data for JSON report
         report_data = {
             "metadata": {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "version": SCRIPT_VERSION,
                 "generatedBy": "AKS Network Diagnostics Script (Python)"
             },
@@ -3169,7 +3170,7 @@ EXAMPLES:
         print()
         print(f"**Cluster:** {self.aks_name} ({self.cluster_info.get('provisioningState', 'Unknown')})")
         print(f"**Resource Group:** {self.aks_rg}")
-        print(f"**Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        print(f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         print()
         
         print("**Configuration:**")
@@ -3246,7 +3247,7 @@ EXAMPLES:
         print(f"**Cluster:** {self.aks_name}")
         print(f"**Resource Group:** {self.aks_rg}")
         print(f"**Subscription:** {self.subscription}")
-        print(f"**Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        print(f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         print()
         
         # Cluster overview
