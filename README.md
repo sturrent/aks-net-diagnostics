@@ -1,14 +1,37 @@
 # AKS Network Diagnostics Tool
 
-A POC Python script for analyzing Azure Kubernetes Service (AKS) cluster network configurations. Performs analysis to diagnose networking issues, validate security configurations, and detect misconfigurations including User Defined Routes (UDRs), DNS, NAT Gateway setups, NSGs, and API server access restrictions.
+A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) cluster network configurations. Performs deep analysis to diagnose networking issues, validate security configurations, and detect misconfigurations including User Defined Routes (UDRs), DNS, NAT Gateway setups, NSGs, and API server access restrictions.
+
+## 🆕 What's New
+
+- **✅ Windows Support**: Full compatibility with Windows PowerShell and Command Prompt
+- **✅ Modular Architecture**: New `aks_diagnostics` package with reusable components
+- **✅ Test Suite**: 26 unit tests ensuring code quality and reliability
+- **✅ Production-Ready Caching**: TTL-based cache with persistence for faster repeated runs
+- **✅ Modern Python**: Updated to use timezone-aware datetime (Python 3.7+ compatible)
 
 ## 🚀 Quick Start
+
+### Windows (PowerShell/CMD)
+
+```powershell
+# Basic analysis with summary output
+python aks-net-diagnostics.py -n my-cluster -g my-resource-group
+
+# Detailed analysis with verbose output
+python aks-net-diagnostics.py -n my-cluster -g my-resource-group --verbose
+
+# Include active connectivity testing from cluster nodes
+python aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
+```
+
+### Linux/macOS
 
 ```bash
 # Basic analysis with summary output
 python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group
 
-# Detailed analysis with verbose output (includes NAT Gateway + API security analysis)
+# Detailed analysis with verbose output
 python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --verbose
 
 # Include active connectivity testing from cluster nodes
@@ -41,14 +64,32 @@ python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
 
 ## 📋 Prerequisites
 
-```bash
-# Required tools
-python3 --version     # Python 3.6+
-az --version          # Azure CLI 2.0+
+### Required Tools
 
-# Azure authentication
+```bash
+# Python 3.7 or higher
+python --version     # Windows
+python3 --version    # Linux/macOS
+
+# Azure CLI 2.0 or higher
+az --version
+```
+
+### Azure Authentication
+
+```bash
+# Login to Azure
 az login
+
+# Set subscription (optional, if you have multiple subscriptions)
 az account set --subscription "your-subscription-id"
+```
+
+### Optional: Install Development Dependencies
+
+```bash
+# For running tests and development
+pip install -r requirements.txt
 ```
 
 ## 🎯 Usage Examples
@@ -199,3 +240,96 @@ python3 aks-net-diagnostics.py -n cluster-with-nsgs -g rg --verbose
 - ❌ **Critical**: NSG rules blocking required AKS traffic (if present)
 - ✅ Inter-node communication validation
 - ✅ Deduplication of NSG findings across multiple NICs with same NSG
+
+## 🧪 Testing
+
+The tool includes a comprehensive test suite to ensure reliability:
+
+```bash
+# Run all tests
+python -m unittest discover -s tests -v
+
+# Run specific test module
+python -m unittest tests.test_validators -v
+python -m unittest tests.test_cache -v
+python -m unittest tests.test_models -v
+```
+
+**Test Coverage:**
+
+- 26 unit tests across 3 test modules
+- Input validation tests (14 test cases)
+- Cache functionality tests (8 test cases)
+- Data model tests (7 test cases)
+
+## 🏗️ Modular Architecture
+
+The tool now includes a modular `aks_diagnostics` package for developers:
+
+```python
+from aks_diagnostics.validators import InputValidator
+from aks_diagnostics.cache import CacheManager
+from aks_diagnostics.azure_cli import AzureCLIExecutor
+from aks_diagnostics.exceptions import AzureCLIError, ValidationError
+
+# Validate input
+try:
+    cluster = InputValidator.validate_resource_name('my-cluster', 'cluster')
+except ValidationError as e:
+    print(f"Invalid: {e}")
+
+# Use cache for better performance
+cache = CacheManager(enabled=True, default_ttl=3600)
+
+# Execute Azure CLI with caching
+azure_cli = AzureCLIExecutor(cache_manager=cache)
+result = azure_cli.execute(['aks', 'show', '-n', cluster, '-g', 'rg'])
+```
+
+**Package Structure:**
+
+```text
+aks_diagnostics/
+├── models.py         # Data models (VMSSInstance, Finding, DiagnosticResult)
+├── exceptions.py     # Custom exception hierarchy (7 types)
+├── validators.py     # Input validation and sanitization
+├── cache.py          # TTL-based cache with file persistence
+├── azure_cli.py      # Azure CLI executor with error handling
+└── base_analyzer.py  # Base class for custom analyzers
+```
+
+## 🔧 Troubleshooting
+
+### Windows Issues
+
+**Azure CLI not found:**
+
+```powershell
+# Verify Azure CLI is installed and in PATH
+az --version
+
+# If not found, add to PATH or use full path
+"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" --version
+```
+
+**Python not found:**
+
+```powershell
+# Verify Python is installed
+python --version
+
+# If using python3 command
+python3 --version
+```
+
+### Linux/macOS Issues
+
+**Permission denied:**
+
+```bash
+# Make script executable
+chmod +x aks-net-diagnostics.py
+
+# Or run with python directly
+python3 aks-net-diagnostics.py -n cluster -g rg
+```
