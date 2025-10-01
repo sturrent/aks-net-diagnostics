@@ -3,18 +3,47 @@
 AKS Network Diagnostics Script
 Comprehensive read-only analysis of AKS cluster network configuration
 Author: Azure Networking Diagnostics Generator
-Version: 2.0
+Version: 2.1
 """
 
 import argparse
 import json
-import subprocess
-import sys
+import logging
 import os
 import re
-from datetime import datetime
+import stat
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
-import logging
+
+# Configuration constants
+SCRIPT_VERSION = "2.1"
+MAX_FILENAME_LENGTH = 50
+MAX_RESOURCE_NAME_LENGTH = 260
+
+# Platform-specific settings
+IS_WINDOWS = os.name == 'nt'
+VMSS_COMMAND_TIMEOUT = 60
+AZURE_CLI_TIMEOUT = 90
+DEFAULT_FILE_PERMISSIONS = 0o600  # Owner read/write only (octal notation)
+
+# Allowed Azure CLI commands for security validation
+ALLOWED_AZ_COMMANDS = {
+    'account', 'aks', 'network', 'vmss', 'vm'
+}
+
+
+@dataclass
+class VMSSInstance:
+    """Represents a VMSS instance eligible for connectivity testing."""
+
+    vmss_name: str
+    resource_group: str
+    instance_id: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 class AKSNetworkDiagnostics:
     """Main class for AKS network diagnostics"""
@@ -47,11 +76,38 @@ class AKSNetworkDiagnostics:
         self.findings: List[Dict[str, Any]] = []
         
         # Setup logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(message)s'
+        self.logger = self._setup_logging()
+    
+    def _setup_logging(self):
+        """Configure logging with appropriate handlers and formatters"""
+        # Create formatter
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
         )
-        self.logger = logging.getLogger(__name__)
+        
+        logger = logging.getLogger("aks_net_diagnostics")
+        logger.propagate = False
+        
+        if not logger.handlers:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+        
+        logger.setLevel(logging.INFO)
+        
+        # Optionally add file handler for debugging
+        if os.environ.get('AKS_DIAGNOSTICS_DEBUG', '').lower() == 'true' and not any(
+            isinstance(handler, logging.FileHandler) and handler.baseFilename.endswith('aks-diagnostics-debug.log')
+            for handler in logger.handlers
+        ):
+            file_handler = logging.FileHandler('aks-diagnostics-debug.log')
+            file_handler.setFormatter(formatter)
+            file_handler.setLevel(logging.DEBUG)
+            logger.addHandler(file_handler)
+            logger.setLevel(logging.DEBUG)
+
+        return logger
     
     def parse_arguments(self):
         """Parse command line arguments"""
@@ -89,9 +145,16 @@ EXAMPLES:
         
         args = parser.parse_args()
         
-        self.aks_name = args.name
-        self.aks_rg = args.resource_group
-        self.subscription = args.subscription
+        # Validate required arguments
+        self.aks_name = self._validate_resource_name(args.name, "cluster name")
+        self.aks_rg = self._validate_resource_name(args.resource_group, "resource group")
+        
+        # Validate optional arguments
+        if args.subscription:
+            self.subscription = self._validate_subscription_id(args.subscription)
+        else:
+            self.subscription = None
+            
         self.probe_test = args.probe_test
         self.json_out = args.json_out
         self.no_json = args.no_json
@@ -101,10 +164,114 @@ EXAMPLES:
         # Auto-generate JSON filename if not disabled and not specified
         if not self.no_json and not self.json_out:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.json_out = f"aks-net-diagnostics_{self.aks_name}_{timestamp}.json"
+            # Sanitize cluster name for filename
+            safe_cluster_name = self._sanitize_filename(self.aks_name)
+            self.json_out = f"aks-net-diagnostics_{safe_cluster_name}_{timestamp}.json"
+        elif self.json_out:
+            # Validate user-provided filename
+            self.json_out = self._validate_output_path(self.json_out)
+    
+    def _validate_azure_cli_command(self, cmd: List[str]) -> None:
+        """Validate Azure CLI command to prevent injection attacks"""
+        if not cmd or not isinstance(cmd, list):
+            raise ValueError("Command must be a non-empty list")
+        
+        # Check if the first argument is an allowed command
+        if cmd[0] not in ALLOWED_AZ_COMMANDS:
+            raise ValueError(f"Command '{cmd[0]}' is not allowed")
+        
+        # Validate that arguments don't contain shell metacharacters
+        dangerous_chars = ['|', '&', ';', '(', ')', '$', '`', '\\', '"', "'", '<', '>']
+        for arg in cmd:
+            if any(char in str(arg) for char in dangerous_chars):
+                # Allow some safe characters in specific contexts
+                if not self._is_safe_argument(str(arg)):
+                    raise ValueError(f"Command argument contains potentially dangerous characters: {arg}")
+    
+    def _is_safe_argument(self, arg: str) -> bool:
+        """Check if an argument with special characters is safe"""
+        # Allow Azure resource IDs which contain forward slashes
+        if arg.startswith('/subscriptions/'):
+            return True
+        # Allow JSON queries which might contain quotes
+        if arg.startswith('[') and arg.endswith(']'):
+            return True
+        # Allow other safe patterns as needed
+        return False
+    
+    def _sanitize_filename(self, filename: str) -> str:
+        """Sanitize filename to prevent path traversal and invalid characters"""
+        # Remove path separators and other dangerous characters
+        dangerous_chars = ['/', '\\', '..', '<', '>', ':', '"', '|', '?', '*']
+        sanitized = filename
+        for char in dangerous_chars:
+            sanitized = sanitized.replace(char, '_')
+        
+        # Limit length and ensure it's not empty
+        sanitized = sanitized[:MAX_FILENAME_LENGTH].strip()
+        if not sanitized:
+            sanitized = "unknown"
+        
+        return sanitized
+    
+    def _validate_output_path(self, filepath: str) -> str:
+        """Validate and sanitize output file path"""
+        # Resolve the path to prevent traversal attacks
+        resolved_path = Path(filepath).expanduser().resolve()
+        current_dir = Path.cwd().resolve()
+
+        try:
+            resolved_path.relative_to(current_dir)
+        except ValueError:
+            raise ValueError("Output file path must be within the current directory")
+        
+        # Ensure the filename has a safe extension
+        if not str(resolved_path).lower().endswith('.json'):
+            resolved_path = resolved_path.with_suffix('.json')
+        
+        return str(resolved_path)
+    
+    def _validate_resource_name(self, name: str, resource_type: str) -> str:
+        """Validate Azure resource name"""
+        if not name or not isinstance(name, str):
+            raise ValueError(f"{resource_type.capitalize()} cannot be empty")
+        
+        # Remove leading/trailing whitespace
+        name = name.strip()
+        
+        # Basic length validation
+        if len(name) < 1 or len(name) > MAX_RESOURCE_NAME_LENGTH:
+            raise ValueError(f"{resource_type.capitalize()} must be between 1 and 260 characters")
+        
+        # Check for obviously malicious patterns
+        dangerous_patterns = ['../', '\\', '<script>', 'javascript:', 'data:']
+        for pattern in dangerous_patterns:
+            if pattern.lower() in name.lower():
+                raise ValueError(f"{resource_type.capitalize()} contains invalid characters")
+        
+        return name
+    
+    def _validate_subscription_id(self, subscription_id: str) -> str:
+        """Validate Azure subscription ID format"""
+        if not subscription_id:
+            raise ValueError("Subscription ID cannot be empty")
+        
+        # Basic GUID format validation (loose)
+        import re
+        guid_pattern = r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        
+        if not re.match(guid_pattern, subscription_id):
+            # Allow subscription names as well, not just GUIDs
+            if len(subscription_id) < 1 or len(subscription_id) > 100:
+                raise ValueError("Invalid subscription ID format")
+        
+        return subscription_id
     
     def run_azure_cli(self, cmd: List[str], expect_json: bool = True) -> Any:
         """Run Azure CLI command and return result"""
+        # Validate command arguments to prevent injection
+        self._validate_azure_cli_command(cmd)
+        
         cmd_str = ' '.join(cmd)
         
         # Check cache first
@@ -116,7 +283,9 @@ EXAMPLES:
                 ['az'] + cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=AZURE_CLI_TIMEOUT,
+                shell=IS_WINDOWS  # Windows needs shell=True for .cmd files
             )
             
             output = result.stdout.strip()
@@ -136,37 +305,41 @@ EXAMPLES:
             else:
                 return output
             
+        except subprocess.TimeoutExpired as e:
+            self.logger.error(f"Azure CLI command timed out after {AZURE_CLI_TIMEOUT}s: {cmd_str}")
+            raise RuntimeError(f"Azure CLI command timed out: {cmd_str}") from e
         except subprocess.CalledProcessError as e:
+            stderr_output = e.stderr.strip() if e.stderr else ''
+            stdout_output = e.stdout.strip() if e.stdout else ''
             self.logger.error(f"Azure CLI command failed: {cmd_str}")
-            if e.stderr:
-                self.logger.error(f"Error: {e.stderr}")
-            return {} if expect_json else ""
+            if stderr_output:
+                self.logger.error(f"Error: {stderr_output}")
+            elif stdout_output:
+                self.logger.error(f"Output: {stdout_output}")
+            raise RuntimeError(f"Azure CLI command failed: {cmd_str}") from e
     
     def check_prerequisites(self):
         """Check if required tools are available"""
         # Check Azure CLI
         try:
-            subprocess.run(['az', '--version'], capture_output=True, check=True)
+            subprocess.run(['az', '--version'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS)
         except (subprocess.CalledProcessError, FileNotFoundError):
-            self.logger.error("Azure CLI is not installed or not in PATH")
-            sys.exit(1)
+            raise FileNotFoundError("Azure CLI is not installed or not in PATH")
         
         # Check if logged in
         try:
-            subprocess.run(['az', 'account', 'show'], capture_output=True, check=True)
+            subprocess.run(['az', 'account', 'show'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS)
         except subprocess.CalledProcessError:
-            self.logger.error("Not logged in to Azure. Run 'az login' first.")
-            sys.exit(1)
+            raise PermissionError("Not logged in to Azure. Run 'az login' first.")
         
         # Set subscription if provided
         if self.subscription:
             try:
                 subprocess.run(['az', 'account', 'set', '--subscription', self.subscription], 
-                             capture_output=True, check=True)
+                             capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS)
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
             except subprocess.CalledProcessError:
-                self.logger.error(f"Failed to set subscription: {self.subscription}")
-                sys.exit(1)
+                raise ValueError(f"Failed to set subscription: {self.subscription}")
         else:
             # Get current subscription
             current_sub = self.run_azure_cli(['account', 'show', '--query', 'id', '-o', 'tsv'], expect_json=False)
@@ -183,8 +356,7 @@ EXAMPLES:
         cluster_result = self.run_azure_cli(cluster_cmd)
         
         if not cluster_result or not isinstance(cluster_result, dict):
-            self.logger.error(f"Failed to get cluster information for {self.aks_name}")
-            sys.exit(1)
+            raise ValueError(f"Failed to get cluster information for {self.aks_name}. Please check the cluster name and resource group.")
         
         self.cluster_info = cluster_result
         
@@ -1152,8 +1324,11 @@ EXAMPLES:
             nsg_name = nsg.get("nsgName", "unknown")
             all_rules = nsg.get("rules", []) + nsg.get("defaultRules", [])
             
+            # Sort rules by priority for proper precedence analysis
+            sorted_rules = sorted(all_rules, key=lambda x: x.get('priority', 65000))
+            
             # Check for rules that might block required AKS traffic
-            for rule in all_rules:
+            for rule in sorted_rules:
                 if rule.get('access', '').lower() == 'deny' and rule.get('priority', 0) < 65000:
                     # Check if this rule could block required AKS outbound traffic
                     if rule.get('direction', '').lower() == 'outbound':
@@ -1164,7 +1339,12 @@ EXAMPLES:
                         # Check for rules that could block essential AKS traffic
                         if (dest in ['*', 'Internet'] or 'MicrosoftContainerRegistry' in str(dest) or 'AzureCloud' in str(dest)):
                             if ('443' in str(ports) or '*' in str(ports)) and protocol.upper() in ['TCP', '*']:
-                                blocking_rules.append({
+                                # Check if there are higher priority allow rules that would override this deny rule
+                                is_overridden, overriding_rules = self._check_rule_precedence(
+                                    rule, sorted_rules, nsg_name
+                                )
+                                
+                                blocking_rule = {
                                     "nsgName": nsg_name,
                                     "ruleName": rule.get('name', 'unknown'),
                                     "priority": rule.get('priority', 0),
@@ -1172,11 +1352,94 @@ EXAMPLES:
                                     "protocol": protocol,
                                     "destination": dest,
                                     "ports": ports,
-                                    "impact": "Could block AKS management traffic"
-                                })
+                                    "impact": "Could block AKS management traffic",
+                                    "isOverridden": is_overridden,
+                                    "overriddenBy": overriding_rules,
+                                    "effectiveSeverity": "warning" if is_overridden else "critical"
+                                }
+                                
+                                blocking_rules.append(blocking_rule)
         
         self.nsg_analysis["blockingRules"] = blocking_rules
         self.nsg_analysis["missingRules"] = missing_rules
+    
+    def _check_rule_precedence(self, deny_rule, sorted_rules, nsg_name):
+        """Check if a deny rule is overridden by higher priority allow rules"""
+        deny_priority = deny_rule.get('priority', 65000)
+        overriding_rules = []
+        
+        # Look for allow rules with higher priority (lower number) that would override this deny rule
+        for rule in sorted_rules:
+            rule_priority = rule.get('priority', 65000)
+            
+            # Only check rules with higher priority (lower priority number)
+            if rule_priority >= deny_priority:
+                break
+                
+            # Only check allow rules in the same direction
+            if (rule.get('access', '').lower() == 'allow' and 
+                rule.get('direction', '').lower() == deny_rule.get('direction', '').lower()):
+                
+                # Check if this allow rule covers the same traffic as the deny rule
+                if self._rules_overlap(deny_rule, rule):
+                    overriding_rules.append({
+                        "ruleName": rule.get('name', 'unknown'),
+                        "priority": rule_priority,
+                        "destination": rule.get('destinationAddressPrefix', ''),
+                        "ports": rule.get('destinationPortRange', ''),
+                        "protocol": rule.get('protocol', '')
+                    })
+        
+        is_overridden = len(overriding_rules) > 0
+        return is_overridden, overriding_rules
+    
+    def _rules_overlap(self, deny_rule, allow_rule):
+        """Check if an allow rule overlaps with a deny rule for AKS traffic"""
+        # Check destination overlap
+        deny_dest = deny_rule.get('destinationAddressPrefix', '').lower()
+        allow_dest = allow_rule.get('destinationAddressPrefix', '').lower()
+        
+        # Check if allow rule covers AKS-related destinations
+        aks_destinations = ['*', 'internet', 'azurecloud', 'microsoftcontainerregistry']
+        
+        dest_overlap = False
+        if allow_dest in aks_destinations:
+            dest_overlap = True
+        elif deny_dest in ['*', 'internet'] and allow_dest in ['azurecloud', 'microsoftcontainerregistry']:
+            dest_overlap = True
+        elif deny_dest in aks_destinations and allow_dest == deny_dest:
+            dest_overlap = True
+        
+        if not dest_overlap:
+            return False
+        
+        # Check port overlap
+        deny_ports = str(deny_rule.get('destinationPortRange', '')).lower()
+        allow_ports = str(allow_rule.get('destinationPortRange', '')).lower()
+        
+        port_overlap = False
+        if allow_ports == '*' or deny_ports == '*':
+            port_overlap = True
+        elif '443' in deny_ports and ('443' in allow_ports or '*' in allow_ports):
+            port_overlap = True
+        elif deny_ports == allow_ports:
+            port_overlap = True
+        
+        if not port_overlap:
+            return False
+        
+        # Check protocol overlap
+        deny_protocol = deny_rule.get('protocol', '').upper()
+        allow_protocol = allow_rule.get('protocol', '').upper()
+        
+        protocol_overlap = (
+            allow_protocol == '*' or 
+            deny_protocol == '*' or 
+            deny_protocol == allow_protocol or
+            (deny_protocol in ['TCP', '*'] and allow_protocol in ['TCP', '*'])
+        )
+        
+        return protocol_overlap
     
     def analyze_private_dns(self):
         """Analyze private DNS configuration"""
@@ -1527,7 +1790,7 @@ EXAMPLES:
         }
         
         # Get VMSS instances for testing (limited to first available for performance)
-        vmss_instances = self._get_vmss_instances_for_connectivity()
+        vmss_instances = self._list_ready_vmss_instances()
         if not vmss_instances:
             self.logger.info("No VMSS instances found for connectivity testing")
             return
@@ -1537,101 +1800,68 @@ EXAMPLES:
         first_vmss = vmss_instances[0]
         total_vmss_count = len(vmss_instances)
         if total_vmss_count > 1:
-            self.logger.info(f"Found {total_vmss_count} VMSS instance(s). Testing connectivity from the first one: {first_vmss['vmss_name']} (skipping {total_vmss_count - 1} others for performance)")
+            self.logger.info(
+                "Found %s VMSS instance(s). Testing connectivity from the first one: %s (skipping %s others for performance)",
+                total_vmss_count,
+                first_vmss.vmss_name,
+                total_vmss_count - 1,
+            )
         else:
-            self.logger.info(f"Found {total_vmss_count} VMSS instance(s). Testing connectivity from: {first_vmss['vmss_name']}")
+            self.logger.info("Found %s VMSS instance(s). Testing connectivity from: %s", total_vmss_count, first_vmss.vmss_name)
         
         self._run_vmss_connectivity_tests(first_vmss)
     
-    def _get_vmss_instances(self):
-        """Get VMSS instances suitable for connectivity testing"""
-        vmss_instances = []
-        
-        try:
-            # Get managed cluster resource group
-            mc_rg = self.cluster_info.get('nodeResourceGroup', '')
-            if not mc_rg:
-                return vmss_instances
-            
-            # List VMSS in the managed cluster resource group
-            cmd = ['vmss', 'list', '-g', mc_rg, '-o', 'json']
-            vmss_list = self.run_azure_cli(cmd)
-            
-            if isinstance(vmss_list, list):
-                for vmss in vmss_list:
-                    vmss_name = vmss.get('name', '')
-                    if vmss_name:
-                        # Get instances for this VMSS
-                        instances_cmd = ['vmss', 'list-instances', '-g', mc_rg, '-n', vmss_name, '-o', 'json']
-                        instances = self.run_azure_cli(instances_cmd)
-                        
-                        if isinstance(instances, list) and instances:
-                            # Use the first running instance from this VMSS
-                            for instance in instances:
-                                if instance.get('provisioningState') == 'Succeeded':
-                                    vmss_instances.append({
-                                        'vmss_name': vmss_name,
-                                        'resource_group': mc_rg,
-                                        'instance_id': str(instance.get('instanceId', '0')),
-                                        'vmss_info': vmss
-                                    })
-                                    break  # Only need one instance per VMSS
-            
-        except Exception as e:
-            self.logger.info(f"Error getting VMSS instances: {e}")
-        
-        return vmss_instances
+    def _list_ready_vmss_instances(self) -> List[VMSSInstance]:
+        """Return one ready instance per VMSS for connectivity probing."""
+        instances: List[VMSSInstance] = []
+        mc_rg = self.cluster_info.get('nodeResourceGroup', '')
+        if not mc_rg:
+            return instances
 
-    def _get_vmss_instances_for_connectivity(self):
-        """Get VMSS instances for connectivity testing (optimized to return only one)"""
-        vmss_instances = []
-        
         try:
-            # Get managed cluster resource group
-            mc_rg = self.cluster_info.get('nodeResourceGroup', '')
-            if not mc_rg:
-                return vmss_instances
-            
-            # List VMSS in the managed cluster resource group
-            cmd = ['vmss', 'list', '-g', mc_rg, '-o', 'json']
-            vmss_list = self.run_azure_cli(cmd)
-            
-            if isinstance(vmss_list, list):
-                # Collect all VMSS first to report total count
-                all_vmss = []
-                for vmss in vmss_list:
-                    vmss_name = vmss.get('name', '')
-                    if vmss_name:
-                        # Get instances for this VMSS
-                        instances_cmd = ['vmss', 'list-instances', '-g', mc_rg, '-n', vmss_name, '-o', 'json']
-                        instances = self.run_azure_cli(instances_cmd)
-                        
-                        if isinstance(instances, list) and instances:
-                            # Find the first running instance from this VMSS
-                            for instance in instances:
-                                if instance.get('provisioningState') == 'Succeeded':
-                                    vmss_instance = {
-                                        'vmss_name': vmss_name,
-                                        'resource_group': mc_rg,
-                                        'instance_id': str(instance.get('instanceId', '0')),
-                                        'vmss_info': vmss
-                                    }
-                                    all_vmss.append(vmss_instance)
-                                    break  # Only need one instance per VMSS
-                
-                # Return all VMSS for reporting, but connectivity testing will only use the first one
-                vmss_instances = all_vmss
-            
-        except Exception as e:
-            self.logger.info(f"Error getting VMSS instances for connectivity testing: {e}")
-        
-        return vmss_instances
+            vmss_list = self.run_azure_cli(['vmss', 'list', '-g', mc_rg, '-o', 'json'])
+        except RuntimeError as exc:
+            self.logger.info(f"Error listing VMSS in {mc_rg}: {exc}")
+            return instances
+
+        if not isinstance(vmss_list, list):
+            return instances
+
+        for vmss in vmss_list:
+            vmss_name = vmss.get('name')
+            if not vmss_name:
+                continue
+
+            try:
+                vmss_nodes = self.run_azure_cli(['vmss', 'list-instances', '-g', mc_rg, '-n', vmss_name, '-o', 'json'])
+            except RuntimeError as exc:
+                self.logger.info(f"Error listing instances for VMSS {vmss_name}: {exc}")
+                continue
+
+            if not isinstance(vmss_nodes, list):
+                continue
+
+            for node in vmss_nodes:
+                if node.get('provisioningState') != 'Succeeded':
+                    continue
+
+                instances.append(
+                    VMSSInstance(
+                        vmss_name=vmss_name,
+                        resource_group=mc_rg,
+                        instance_id=str(node.get('instanceId', '0')),
+                        metadata={'vmss': vmss, 'instance': node},
+                    )
+                )
+                break  # Only need one ready instance per VMSS
+
+        return instances
     
-    def _run_vmss_connectivity_tests(self, vmss_info):
+    def _run_vmss_connectivity_tests(self, vmss_instance: VMSSInstance):
         """Run connectivity tests on a VMSS instance"""
-        vmss_name = vmss_info['vmss_name']
-        resource_group = vmss_info['resource_group']
-        instance_id = vmss_info['instance_id']
+        vmss_name = vmss_instance.vmss_name
+        resource_group = vmss_instance.resource_group
+        instance_id = vmss_instance.instance_id
         
         self.logger.info(f"Running connectivity tests on VMSS {vmss_name}, instance {instance_id}")
         
@@ -1719,12 +1949,12 @@ EXAMPLES:
             
             # Always run DNS test first
             self.logger.info(f"  Testing {service_name} - DNS Resolution")
-            dns_result = self._execute_vmss_test(vmss_info, group['dns_test'])
+            dns_result = self._execute_vmss_test(vmss_instance, group['dns_test'])
             
             # Only run connectivity test if DNS succeeded
             if dns_result and dns_result.get('status') == 'passed':
                 self.logger.info(f"  Testing {service_name} - HTTPS Connectivity")
-                self._execute_vmss_test(vmss_info, group['connectivity_test'])
+                self._execute_vmss_test(vmss_instance, group['connectivity_test'])
             else:
                 # DNS failed, skip connectivity test and log why
                 self.logger.info(f"  Skipping {service_name} HTTPS test - DNS resolution failed")
@@ -1732,8 +1962,8 @@ EXAMPLES:
                 # Create a skipped test result for the connectivity test
                 skipped_result = {
                     'test_name': group['connectivity_test']['name'],
-                    'vmss_name': vmss_info['vmss_name'],
-                    'instance_id': vmss_info['instance_id'],
+                    'vmss_name': vmss_instance.vmss_name,
+                    'instance_id': vmss_instance.instance_id,
                     'status': 'skipped',
                     'exit_code': -1,
                     'output': '',
@@ -1794,30 +2024,27 @@ EXAMPLES:
         except Exception:
             return False
     
-    def _execute_vmss_test(self, vmss_info, test):
+    def _execute_vmss_test(self, vmss_instance: VMSSInstance, test):
         """Execute a single connectivity test on VMSS instance"""
-        vmss_name = vmss_info['vmss_name']
-        resource_group = vmss_info['resource_group']
-        instance_id = vmss_info['instance_id']
+        vmss_name = vmss_instance.vmss_name
+        resource_group = vmss_instance.resource_group
+        instance_id = vmss_instance.instance_id
         
         try:
             self.logger.info(f"  Running test: {test['name']}")
             
             # Build the run-command
-            cmd = [
-                'vmss', 'run-command', 'invoke',
-                '--subscription', self.subscription or '',
+            cmd = ['vmss', 'run-command', 'invoke']
+            if self.subscription:
+                cmd.extend(['--subscription', self.subscription])
+            cmd.extend([
                 '-g', resource_group,
                 '-n', vmss_name,
                 '--command-id', 'RunShellScript',
                 '--instance-id', instance_id,
                 '--scripts', test['script'],
                 '-o', 'json'
-            ]
-            
-            # Remove empty subscription if not provided
-            if not self.subscription:
-                cmd = cmd[3:]  # Remove --subscription and empty value
+            ])
             
             # Execute the command with timeout - use special handling for VMSS commands
             result = self._run_vmss_command(cmd)
@@ -1860,8 +2087,6 @@ EXAMPLES:
             self.api_probe_results['summary']['errors'] += 1
             self.logger.info(f"    ⚠️ ERROR: {test['name']} - {str(e)}")
             return error_result
-            self.api_probe_results['summary']['errors'] += 1
-            self.logger.info(f"    ⚠️ ERROR: {test['name']} - {str(e)}")
     
     def _run_vmss_command(self, cmd: List[str]) -> Any:
         """Run VMSS command with enhanced error handling"""
@@ -1872,7 +2097,7 @@ EXAMPLES:
                 ['az'] + cmd,
                 capture_output=True,
                 text=True,
-                timeout=60  # 60 second timeout for VMSS commands
+                timeout=VMSS_COMMAND_TIMEOUT
             )
             
             output = result.stdout.strip()
@@ -1895,7 +2120,7 @@ EXAMPLES:
                 
         except subprocess.TimeoutExpired:
             return {
-                "error": "VMSS command timed out after 60 seconds",
+                "error": f"VMSS command timed out after {VMSS_COMMAND_TIMEOUT} seconds",
                 "stderr": "Command execution timeout - This often indicates DNS resolution failure for private clusters with missing private DNS zone links"
             }
         except subprocess.CalledProcessError as e:
@@ -2188,7 +2413,11 @@ EXAMPLES:
             output_to_parse = nslookup_output.replace('\\n', '\n')
             
             # Check for DNS resolution failures first
-            if any(error in output_to_parse.lower() for error in ['nxdomain', 'servfail', 'refused', "can't find"]):
+            dns_error_patterns = [
+                'nxdomain', 'servfail', 'refused', "can't find", 
+                'no servers could be reached', 'communications error', 'timed out'
+            ]
+            if any(error in output_to_parse.lower() for error in dns_error_patterns):
                 return False  # DNS resolution failed completely
             
             # Parse nslookup output to extract IP addresses
@@ -2226,8 +2455,13 @@ EXAMPLES:
             return False
             
         except Exception as e:
-            # If we can't parse the output, fall back to checking for resolution errors
-            return not any(error in nslookup_output.lower() for error in ['nxdomain', 'servfail', 'refused', "can't find"])
+            # If we can't parse the output, be conservative and check for any error indicators
+            dns_error_patterns = [
+                'nxdomain', 'servfail', 'refused', "can't find", 
+                'no servers could be reached', 'communications error', 'timed out'
+            ]
+            # Return False if any error patterns are found, True only if none are found
+            return not any(error in nslookup_output.lower() for error in dns_error_patterns)
     
     def analyze_misconfigurations(self):
         """Analyze potential misconfigurations and failures"""
@@ -2762,11 +2996,25 @@ EXAMPLES:
         # Check for blocking rules that could affect AKS functionality
         blocking_rules = self.nsg_analysis.get("blockingRules", [])
         for rule in blocking_rules:
+            # Use the effective severity based on rule precedence analysis
+            effective_severity = rule.get("effectiveSeverity", "critical")
+            is_overridden = rule.get("isOverridden", False)
+            overriding_rules = rule.get("overriddenBy", [])
+            
+            # Create appropriate message based on precedence
+            if is_overridden:
+                overriding_rule_names = [r.get('ruleName', 'unknown') for r in overriding_rules[:2]]  # Show first 2
+                message = f"NSG rule '{rule.get('ruleName')}' could block AKS traffic, but higher-priority allow rules override it: {', '.join(overriding_rule_names)}"
+                recommendation = f"Rule is currently ineffective due to higher-priority rules. Consider removing or adjusting priority {rule.get('priority')} for cleaner NSG configuration."
+            else:
+                message = f"NSG rule '{rule.get('ruleName')}' in '{rule.get('nsgName')}' may block AKS traffic"
+                recommendation = f"Review NSG rule priority {rule.get('priority')} - {rule.get('impact', 'Could affect cluster functionality')}"
+            
             findings.append({
-                "severity": "critical",
+                "severity": effective_severity,
                 "code": "NSG_BLOCKING_AKS_TRAFFIC",
-                "message": f"NSG rule '{rule.get('ruleName')}' in '{rule.get('nsgName')}' may block AKS traffic",
-                "recommendation": f"Review NSG rule priority {rule.get('priority')} - {rule.get('impact', 'Could affect cluster functionality')}"
+                "message": message,
+                "recommendation": recommendation
             })
         
         # Check for inter-node communication issues
@@ -2858,8 +3106,8 @@ EXAMPLES:
         # Prepare all data for JSON report
         report_data = {
             "metadata": {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-                "version": "2.0",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "version": SCRIPT_VERSION,
                 "generatedBy": "AKS Network Diagnostics Script (Python)"
             },
             "cluster": {
@@ -2897,8 +3145,13 @@ EXAMPLES:
         # Output JSON report if not disabled
         if not self.no_json and self.json_out:
             try:
+                # Create file with secure permissions (owner read/write only)
+                import stat
                 with open(self.json_out, 'w') as f:
                     json.dump(report_data, f, indent=2)
+                
+                # Set secure file permissions (readable/writable by owner only)
+                os.chmod(self.json_out, DEFAULT_FILE_PERMISSIONS)
                 self.logger.info(f"📄 JSON report saved to: {self.json_out}")
             except Exception as e:
                 self.logger.error(f"Failed to save JSON report: {e}")
@@ -2920,7 +3173,7 @@ EXAMPLES:
         print()
         print(f"**Cluster:** {self.aks_name} ({self.cluster_info.get('provisioningState', 'Unknown')})")
         print(f"**Resource Group:** {self.aks_rg}")
-        print(f"**Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        print(f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         print()
         
         print("**Configuration:**")
@@ -2997,7 +3250,7 @@ EXAMPLES:
         print(f"**Cluster:** {self.aks_name}")
         print(f"**Resource Group:** {self.aks_rg}")
         print(f"**Subscription:** {self.subscription}")
-        print(f"**Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        print(f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         print()
         
         # Cluster overview
@@ -3370,15 +3623,30 @@ EXAMPLES:
 
 def main():
     """Main entry point"""
+    exit_code = 0
     try:
         diagnostics = AKSNetworkDiagnostics()
         diagnostics.run()
     except KeyboardInterrupt:
         print("\n\nOperation cancelled by user.")
-        sys.exit(1)
+        exit_code = 130  # Standard exit code for SIGINT
+    except ValueError as e:
+        print(f"\nConfiguration Error: {e}")
+        exit_code = 2
+    except FileNotFoundError as e:
+        print(f"\nFile Error: {e}")
+        exit_code = 3
+    except PermissionError as e:
+        print(f"\nPermission Error: {e}")
+        exit_code = 4
     except Exception as e:
-        print(f"\nError: {e}")
-        sys.exit(1)
+        print(f"\nUnexpected Error: {e}")
+        # In verbose mode or debug, show stack trace
+        import traceback
+        traceback.print_exc()
+        exit_code = 1
+    finally:
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":
