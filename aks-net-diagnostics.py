@@ -2972,21 +2972,21 @@ EXAMPLES:
         warning_findings = [f for f in self.findings if f.get('severity') == 'warning']
         
         if len(critical_findings) == 0 and len(warning_findings) == 0:
-            safe_print("- ✅ No critical issues detected")
+            safe_print("- ✅  No critical issues detected")
         else:
             # Show critical/error findings
             for finding in critical_findings:
                 # For cluster operation failures, show only the error code in non-verbose mode
                 if finding.get('code') == 'CLUSTER_OPERATION_FAILURE' and finding.get('error_code'):
-                    safe_print(f"- ❌ Cluster failed with error: {finding.get('error_code')}")
+                    safe_print(f"- ❌  Cluster failed with error: {finding.get('error_code')}")
                 else:
                     message = finding.get('message', 'Unknown issue')
-                    safe_print(f"- ❌ {message}")
+                    safe_print(f"- ❌  {message}")
             
             # Show warning findings
             for finding in warning_findings:
                 message = finding.get('message', 'Unknown issue')
-                safe_print(f"- ⚠️ {message}")
+                safe_print(f"- ⚠️  {message}")
         
         print()
         print("Tip: Use --verbose flag for detailed analysis or check the JSON report for complete findings.")
