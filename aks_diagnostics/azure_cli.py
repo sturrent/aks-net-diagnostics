@@ -48,6 +48,10 @@ class AzureCLIExecutor:
         # Validate command arguments to prevent injection
         InputValidator.validate_azure_cli_command(cmd)
         
+        # Add -o json if expecting JSON output and not already present
+        if expect_json and '-o' not in cmd and '--output' not in cmd:
+            cmd = cmd + ['-o', 'json']
+        
         cmd_str = ' '.join(cmd)
         
         # Check cache first
