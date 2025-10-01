@@ -173,8 +173,8 @@ def print_findings(findings):
 def main():
     """Main test function."""
     # Configuration
-    cluster_name = "aks-dns-ex1"
-    resource_group = "aks-dns-ex1-rg"
+    cluster_name = "aks-overlay"
+    resource_group = "aks-overlay-rg"
     
     print("="*80)
     print("🧪 NSG ANALYZER LIVE TEST")

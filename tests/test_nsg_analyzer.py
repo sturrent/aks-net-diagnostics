@@ -26,19 +26,21 @@ class TestNSGAnalyzer(unittest.TestCase):
         self.vmss_info = [
             {
                 "name": "aks-nodepool1-12345678-vmss",
-                "networkProfile": {
-                    "networkInterfaceConfigurations": [
-                        {
-                            "name": "nic-0",
-                            "ipConfigurations": [
-                                {
-                                    "subnet": {
-                                        "id": "/subscriptions/sub-id/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet/subnets/subnet1"
+                "virtualMachineProfile": {
+                    "networkProfile": {
+                        "networkInterfaceConfigurations": [
+                            {
+                                "name": "nic-0",
+                                "ipConfigurations": [
+                                    {
+                                        "subnet": {
+                                            "id": "/subscriptions/sub-id/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet/subnets/subnet1"
+                                        }
                                     }
-                                }
-                            ]
-                        }
-                    ]
+                                ]
+                            }
+                        ]
+                    }
                 }
             }
         ]
@@ -169,16 +171,18 @@ class TestNSGAnalyzer(unittest.TestCase):
         vmss_info = [
             {
                 "name": "aks-nodepool1-12345678-vmss",
-                "networkProfile": {
-                    "networkInterfaceConfigurations": [
-                        {
-                            "name": "nic-0",
-                            "networkSecurityGroup": {
-                                "id": "/subscriptions/sub-id/resourceGroups/test-rg/providers/Microsoft.Network/networkSecurityGroups/nic-nsg"
-                            },
-                            "ipConfigurations": []
-                        }
-                    ]
+                "virtualMachineProfile": {
+                    "networkProfile": {
+                        "networkInterfaceConfigurations": [
+                            {
+                                "name": "nic-0",
+                                "networkSecurityGroup": {
+                                    "id": "/subscriptions/sub-id/resourceGroups/test-rg/providers/Microsoft.Network/networkSecurityGroups/nic-nsg"
+                                },
+                                "ipConfigurations": []
+                            }
+                        ]
+                    }
                 }
             }
         ]

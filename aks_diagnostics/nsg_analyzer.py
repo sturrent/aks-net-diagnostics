@@ -147,7 +147,8 @@ class NSGAnalyzer(BaseAnalyzer):
         
         for vmss in self.vmss_info:
             vmss_name = vmss.get("name", "unknown")
-            network_profile = vmss.get("networkProfile", {})
+            vm_profile = vmss.get("virtualMachineProfile", {})
+            network_profile = vm_profile.get("networkProfile", {})
             network_interfaces = network_profile.get("networkInterfaceConfigurations", [])
             
             for nic in network_interfaces:
@@ -204,7 +205,8 @@ class NSGAnalyzer(BaseAnalyzer):
             if not vmss_name:
                 continue
             
-            network_profile = vmss.get("networkProfile", {})
+            vm_profile = vmss.get("virtualMachineProfile", {})
+            network_profile = vm_profile.get("networkProfile", {})
             network_interfaces = network_profile.get('networkInterfaceConfigurations', [])
             
             for nic_config in network_interfaces:
