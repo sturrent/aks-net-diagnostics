@@ -5,10 +5,14 @@ Azure CLI command executor with improved error handling
 import subprocess
 import json
 import logging
+import os
 from typing import Any, List, Optional
 from .exceptions import AzureCLIError, AzureAuthenticationError
 from .validators import InputValidator
 from .cache import CacheManager
+
+# Platform detection for subprocess shell parameter
+IS_WINDOWS = os.name == 'nt'
 
 
 class AzureCLIExecutor:
@@ -44,6 +48,10 @@ class AzureCLIExecutor:
         # Validate command arguments to prevent injection
         InputValidator.validate_azure_cli_command(cmd)
         
+        # Add -o json if expecting JSON output and not already present
+        if expect_json and '-o' not in cmd and '--output' not in cmd:
+            cmd = cmd + ['-o', 'json']
+        
         cmd_str = ' '.join(cmd)
         
         # Check cache first
@@ -58,7 +66,8 @@ class AzureCLIExecutor:
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=self.AZURE_CLI_TIMEOUT
+                timeout=self.AZURE_CLI_TIMEOUT,
+                shell=IS_WINDOWS
             )
             
             output = result.stdout.strip()
@@ -127,7 +136,8 @@ class AzureCLIExecutor:
                 ['az', '--version'],
                 capture_output=True,
                 check=True,
-                timeout=self.AZURE_CLI_TIMEOUT
+                timeout=self.AZURE_CLI_TIMEOUT,
+                shell=IS_WINDOWS
             )
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             raise FileNotFoundError(
@@ -141,7 +151,8 @@ class AzureCLIExecutor:
                 ['az', 'account', 'show'],
                 capture_output=True,
                 check=True,
-                timeout=self.AZURE_CLI_TIMEOUT
+                timeout=self.AZURE_CLI_TIMEOUT,
+                shell=IS_WINDOWS
             )
         except subprocess.CalledProcessError as e:
             raise AzureAuthenticationError(
