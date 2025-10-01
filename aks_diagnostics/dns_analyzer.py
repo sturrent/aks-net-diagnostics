@@ -12,22 +12,26 @@ import re
 import ipaddress
 from typing import Dict, List, Any, Optional
 from .models import Finding
+from .azure_cli import AzureCLIExecutor
 
 
 class DNSAnalyzer:
     """Analyzer for AKS DNS configuration and resolution"""
     
-    def __init__(self, cluster_info: Dict[str, Any]):
+    def __init__(self, cluster_info: Dict[str, Any], azure_cli: Optional[AzureCLIExecutor] = None):
         """
         Initialize DNS analyzer
         
         Args:
             cluster_info: AKS cluster information from Azure CLI
+            azure_cli: Optional Azure CLI executor for making Azure CLI calls
         """
         self.logger = logging.getLogger("aks_net_diagnostics.dns_analyzer")
         self.cluster_info = cluster_info
+        self.azure_cli = azure_cli
         self.dns_analysis: Dict[str, Any] = {}
         self.findings: List[Finding] = []
+        self.vnet_dns_servers: List[str] = []
     
     def analyze(self) -> Dict[str, Any]:
         """
@@ -40,6 +44,9 @@ class DNSAnalyzer:
         
         # Analyze private DNS zone configuration
         self._analyze_private_dns_zone()
+        
+        # Analyze VNet DNS server configuration
+        self._analyze_vnet_dns_servers()
         
         return self.dns_analysis
     
@@ -99,6 +106,122 @@ class DNSAnalyzer:
             }
             
             self.logger.info("  System-managed private DNS zone")
+    
+    def _analyze_vnet_dns_servers(self) -> None:
+        """Analyze VNet DNS server configuration and detect custom DNS that may impact private DNS resolution"""
+        if not self.azure_cli:
+            self.logger.debug("  No Azure CLI executor available, skipping VNet DNS analysis")
+            return
+        
+        try:
+            # Get VNet subnet ID from cluster
+            # Try networkProfile first, then agentPoolProfiles
+            network_profile = self.cluster_info.get('networkProfile', {})
+            vnet_subnet_id = network_profile.get('vnetSubnetId')
+            
+            if not vnet_subnet_id:
+                # Try getting from first agent pool profile
+                agent_pools = self.cluster_info.get('agentPoolProfiles', [])
+                if agent_pools and len(agent_pools) > 0:
+                    vnet_subnet_id = agent_pools[0].get('vnetSubnetId')
+            
+            if not vnet_subnet_id:
+                self.logger.debug("  No VNet subnet ID found in cluster info")
+                return
+            
+            self.logger.debug(f"  Found VNet subnet ID: {vnet_subnet_id}")
+            
+            # Parse VNet resource ID from subnet ID
+            # Format: /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{subnet}
+            vnet_parts = vnet_subnet_id.split('/')
+            if len(vnet_parts) < 9:
+                self.logger.warning(f"  Unable to parse VNet ID from subnet: {vnet_subnet_id}")
+                return
+            
+            vnet_rg = vnet_parts[4]
+            vnet_name = vnet_parts[8]
+            
+            # Get VNet details including DNS servers
+            vnet_info = self.azure_cli.execute([
+                'network', 'vnet', 'show',
+                '--name', vnet_name,
+                '--resource-group', vnet_rg
+            ])
+            
+            if not vnet_info:
+                self.logger.warning(f"  Unable to retrieve VNet information for {vnet_name}")
+                return
+            
+            # Get DNS servers from VNet
+            dhcp_options = vnet_info.get('dhcpOptions', {})
+            dns_servers = dhcp_options.get('dnsServers', [])
+            
+            self.vnet_dns_servers = dns_servers
+            self.dns_analysis['vnetDnsServers'] = dns_servers
+            
+            if not dns_servers:
+                # Using Azure default DNS
+                self.logger.info(f"  VNet '{vnet_name}' using Azure default DNS (168.63.129.16)")
+                self.dns_analysis['vnetDnsConfig'] = "azure-default"
+                return
+            
+            self.logger.info(f"  VNet '{vnet_name}' has custom DNS servers: {', '.join(dns_servers)}")
+            self.dns_analysis['vnetDnsConfig'] = "custom"
+            
+            # Check for potential issues with custom DNS
+            is_private_cluster = self.dns_analysis.get('isPrivateCluster', False)
+            azure_dns = '168.63.129.16'
+            has_azure_dns = azure_dns in dns_servers
+            non_azure_dns = [dns for dns in dns_servers if dns != azure_dns]
+            
+            if non_azure_dns and is_private_cluster:
+                # Private cluster with custom DNS - high risk
+                from .models import FindingCode
+                self.findings.append(Finding.create_critical(
+                    code=FindingCode.PRIVATE_DNS_MISCONFIGURED,
+                    message=f"Private cluster is using custom DNS servers ({', '.join(non_azure_dns)}) that cannot resolve Azure private DNS zones",
+                    recommendation=(
+                        f"For private clusters, ensure custom DNS servers forward Azure private DNS zone queries to Azure DNS (168.63.129.16). "
+                        f"Current DNS servers: {', '.join(dns_servers)}. "
+                        f"Either: (1) Configure DNS forwarding to 168.63.129.16 for '*.privatelink.*.azmk8s.io', "
+                        f"(2) Use Azure DNS as primary DNS server, or "
+                        f"(3) Configure conditional forwarding in your custom DNS solution."
+                    ),
+                    vnetName=vnet_name,
+                    vnetResourceGroup=vnet_rg,
+                    customDnsServers=non_azure_dns,
+                    hasAzureDns=has_azure_dns,
+                    privateDnsZone=self.dns_analysis.get('privateDnsZone')
+                ))
+                self.logger.warning(f"  CRITICAL: Custom DNS servers may prevent private DNS resolution")
+            
+            elif non_azure_dns and not is_private_cluster:
+                # Public cluster with custom DNS - medium risk (CoreDNS may have issues)
+                from .models import FindingCode
+                self.findings.append(Finding.create_warning(
+                    code=FindingCode.DNS_RESOLUTION_FAILED,
+                    message=f"VNet is using custom DNS servers ({', '.join(non_azure_dns)}) which may impact CoreDNS functionality",
+                    recommendation=(
+                        f"Custom DNS servers should forward Azure service queries to Azure DNS (168.63.129.16). "
+                        f"Current DNS servers: {', '.join(dns_servers)}. "
+                        f"If experiencing DNS resolution issues, verify that:\n"
+                        f"1. Custom DNS can reach Azure DNS (168.63.129.16)\n"
+                        f"2. Azure-specific domains are forwarded correctly\n"
+                        f"3. DNS forwarding is configured for '*.azmk8s.io' and other Azure services"
+                    ),
+                    vnetName=vnet_name,
+                    vnetResourceGroup=vnet_rg,
+                    customDnsServers=non_azure_dns,
+                    hasAzureDns=has_azure_dns
+                ))
+                self.logger.warning(f"  WARNING: Custom DNS may impact CoreDNS and Azure service resolution")
+            
+            elif has_azure_dns and len(dns_servers) > 1:
+                # Mix of Azure DNS and custom DNS - informational
+                self.logger.info(f"  VNet uses Azure DNS along with custom DNS servers")
+        
+        except Exception as e:
+            self.logger.error(f"  Failed to analyze VNet DNS configuration: {e}")
     
     def validate_private_dns_resolution(self, nslookup_output: str, hostname: str) -> bool:
         """

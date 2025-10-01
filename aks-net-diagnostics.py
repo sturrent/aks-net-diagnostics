@@ -1151,8 +1151,11 @@ EXAMPLES:
         self.logger.info("Analyzing private DNS configuration...")
         
         try:
-            # Create DNS analyzer instance
-            dns_analyzer = DNSAnalyzer(cluster_info=self.cluster_info)
+            # Create DNS analyzer instance with Azure CLI executor
+            dns_analyzer = DNSAnalyzer(
+                cluster_info=self.cluster_info,
+                azure_cli=self.azure_cli_executor
+            )
             
             # Run analysis
             self.private_dns_analysis = dns_analyzer.analyze()
