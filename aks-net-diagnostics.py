@@ -42,6 +42,29 @@ ALLOWED_AZ_COMMANDS = {
 }
 
 
+def safe_print(text: str) -> None:
+    """
+    Print text with Unicode fallback for Windows console.
+    Replaces emoji with ASCII equivalents if encoding fails.
+    """
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        # Replace common emoji with ASCII equivalents
+        replacements = {
+            '✅': '[OK]',
+            '❌': '[ERROR]',
+            '⚠️': '[WARNING]',
+            '⚡': '[!]',
+            '🔍': '[INFO]',
+            '📊': '[STATS]',
+        }
+        safe_text = text
+        for emoji, ascii_replacement in replacements.items():
+            safe_text = safe_text.replace(emoji, ascii_replacement)
+        print(safe_text)
+
+
 @dataclass
 class VMSSInstance:
     """Represents a VMSS instance eligible for connectivity testing."""
@@ -1165,7 +1188,8 @@ EXAMPLES:
             
             # Convert findings to dict format for compatibility with existing report generation
             for finding in analyzer_findings:
-                self.findings.append(finding.to_dict())
+                finding_dict = finding.to_dict()
+                self.findings.append(finding_dict)
             
             # Store analyzer instance for later use (e.g., in connectivity tests)
             self.dns_analyzer = dns_analyzer
@@ -2280,7 +2304,8 @@ EXAMPLES:
         if not getattr(self, '_cluster_stopped', False):
             self._analyze_connectivity_test_results(findings)
         
-        self.findings = findings
+        # Extend existing findings instead of replacing them
+        self.findings.extend(findings)
     
     def _get_cluster_status_error(self):
         """Get detailed cluster error information from status field"""
@@ -2888,7 +2913,7 @@ EXAMPLES:
         else:
             self._print_summary_report()
         
-        print(f"\n✅ AKS network assessment completed successfully!")
+        safe_print(f"\n✅ AKS network assessment completed successfully!")
     
     def _print_summary_report(self):
         """Print summary report"""
@@ -2947,21 +2972,21 @@ EXAMPLES:
         warning_findings = [f for f in self.findings if f.get('severity') == 'warning']
         
         if len(critical_findings) == 0 and len(warning_findings) == 0:
-            print("- ✅ No critical issues detected")
+            safe_print("- ✅ No critical issues detected")
         else:
             # Show critical/error findings
             for finding in critical_findings:
                 # For cluster operation failures, show only the error code in non-verbose mode
                 if finding.get('code') == 'CLUSTER_OPERATION_FAILURE' and finding.get('error_code'):
-                    print(f"- ❌ Cluster failed with error: {finding.get('error_code')}")
+                    safe_print(f"- ❌ Cluster failed with error: {finding.get('error_code')}")
                 else:
                     message = finding.get('message', 'Unknown issue')
-                    print(f"- ❌ {message}")
+                    safe_print(f"- ❌ {message}")
             
             # Show warning findings
             for finding in warning_findings:
                 message = finding.get('message', 'Unknown issue')
-                print(f"- ⚠️ {message}")
+                safe_print(f"- ⚠️ {message}")
         
         print()
         print("Tip: Use --verbose flag for detailed analysis or check the JSON report for complete findings.")
@@ -3081,14 +3106,14 @@ EXAMPLES:
                         print(f"  - **Critical Routes:**")
                         for route in critical_routes:
                             impact = route.get('impact', {})
-                            print(f"    - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) → {route.get('nextHopType', '')} - {impact.get('description', '')}")
+                            safe_print(f"    - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) -> {route.get('nextHopType', '')} - {impact.get('description', '')}")
                 
                 # Show virtual appliance routes summary
                 va_routes = udr_analysis.get("virtualApplianceRoutes", [])
                 if va_routes:
                     print(f"- **Virtual Appliance Routes:** {len(va_routes)}")
                     for route in va_routes:
-                        print(f"  - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) → {route.get('nextHopIpAddress', '')}")
+                        safe_print(f"  - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) -> {route.get('nextHopIpAddress', '')}")
                 
                 print()
             else:
@@ -3178,12 +3203,12 @@ EXAMPLES:
             
             # Inter-node communication status
             status_icon = {
-                'ok': '✅',
-                'potential_issues': '⚠️',
-                'blocked': '❌',
-                'unknown': '❓'
-            }.get(inter_node_status, '❓')
-            print(f"- **Inter-node Communication:** {status_icon} {inter_node_status.replace('_', ' ').title()}")
+                'ok': '[OK]',
+                'potential_issues': '[WARNING]',
+                'blocked': '[ERROR]',
+                'unknown': '[?]'
+            }.get(inter_node_status, '[?]')
+            safe_print(f"- **Inter-node Communication:** {status_icon} {inter_node_status.replace('_', ' ').title()}")
             
             # Show detailed NSG information in verbose mode
             if self.verbose and total_nsgs > 0:
@@ -3198,7 +3223,7 @@ EXAMPLES:
                         custom_rules = len(nsg.get('rules', []))
                         default_rules = len(nsg.get('defaultRules', []))
                         
-                        print(f"- **{subnet_name}** → NSG: {nsg_name}")
+                        safe_print(f"- **{subnet_name}** -> NSG: {nsg_name}")
                         print(f"  - Custom Rules: {custom_rules}, Default Rules: {default_rules}")
                         
                         # Show custom rules
@@ -3321,7 +3346,7 @@ EXAMPLES:
                     print(f"**Recommendation:** {finding.get('recommendation', '')}")
                 print()
         else:
-            print("✅ No issues detected in the network configuration!")
+            safe_print("✅ No issues detected in the network configuration!")
             print()
     
     def run(self):
