@@ -23,6 +23,9 @@ from typing import Dict, List, Optional, Any, Tuple
 SCRIPT_VERSION = "2.1"
 MAX_FILENAME_LENGTH = 50
 MAX_RESOURCE_NAME_LENGTH = 260
+
+# Platform-specific settings
+IS_WINDOWS = os.name == 'nt'
 VMSS_COMMAND_TIMEOUT = 60
 AZURE_CLI_TIMEOUT = 90
 DEFAULT_FILE_PERMISSIONS = 0o600  # Owner read/write only (octal notation)
@@ -282,7 +285,7 @@ EXAMPLES:
                 text=True,
                 check=True,
                 timeout=AZURE_CLI_TIMEOUT,
-                shell=True
+                shell=IS_WINDOWS  # Windows needs shell=True for .cmd files
             )
             
             output = result.stdout.strip()
@@ -319,13 +322,13 @@ EXAMPLES:
         """Check if required tools are available"""
         # Check Azure CLI
         try:
-            subprocess.run(['az', '--version'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=True)
+            subprocess.run(['az', '--version'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS)
         except (subprocess.CalledProcessError, FileNotFoundError):
             raise FileNotFoundError("Azure CLI is not installed or not in PATH")
         
         # Check if logged in
         try:
-            subprocess.run(['az', 'account', 'show'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=True)
+            subprocess.run(['az', 'account', 'show'], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS)
         except subprocess.CalledProcessError:
             raise PermissionError("Not logged in to Azure. Run 'az login' first.")
         
@@ -333,7 +336,7 @@ EXAMPLES:
         if self.subscription:
             try:
                 subprocess.run(['az', 'account', 'set', '--subscription', self.subscription], 
-                             capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=True)
+                             capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS)
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
             except subprocess.CalledProcessError:
                 raise ValueError(f"Failed to set subscription: {self.subscription}")
