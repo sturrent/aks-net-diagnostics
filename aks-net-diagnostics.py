@@ -21,6 +21,7 @@ from typing import Dict, List, Optional, Any, Tuple
 
 # Import new modular components
 from aks_diagnostics.nsg_analyzer import NSGAnalyzer
+from aks_diagnostics.dns_analyzer import DNSAnalyzer
 from aks_diagnostics.azure_cli import AzureCLIExecutor
 from aks_diagnostics.cache import CacheManager
 
@@ -39,6 +40,29 @@ DEFAULT_FILE_PERMISSIONS = 0o600  # Owner read/write only (octal notation)
 ALLOWED_AZ_COMMANDS = {
     'account', 'aks', 'network', 'vmss', 'vm'
 }
+
+
+def safe_print(text: str) -> None:
+    """
+    Print text with Unicode fallback for Windows console.
+    Replaces emoji with ASCII equivalents if encoding fails.
+    """
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        # Replace common emoji with ASCII equivalents
+        replacements = {
+            '✅': '[OK]',
+            '❌': '[ERROR]',
+            '⚠️': '[WARNING]',
+            '⚡': '[!]',
+            '🔍': '[INFO]',
+            '📊': '[STATS]',
+        }
+        safe_text = text
+        for emoji, ascii_replacement in replacements.items():
+            safe_text = safe_text.replace(emoji, ascii_replacement)
+        print(safe_text)
 
 
 @dataclass
@@ -86,6 +110,7 @@ class AKSNetworkDiagnostics:
         # Initialize modular components (will be set up after cache is enabled)
         self.azure_cli_executor: Optional[AzureCLIExecutor] = None
         self.cache_manager: Optional[CacheManager] = None
+        self.dns_analyzer: Optional[DNSAnalyzer] = None
     
     def _setup_logging(self):
         """Configure logging with appropriate handlers and formatters"""
@@ -1145,33 +1170,40 @@ EXAMPLES:
                 "interNodeCommunication": {"status": "unknown", "issues": []}
             }
     def analyze_private_dns(self):
-        """Analyze private DNS configuration"""
+        """Analyze private DNS configuration using modular DNSAnalyzer"""
         self.logger.info("Analyzing private DNS configuration...")
         
-        api_server_profile = self.cluster_info.get('apiServerAccessProfile')
-        if not api_server_profile:
-            return
-        
-        is_private = api_server_profile.get('enablePrivateCluster', False)
-        if not is_private:
-            return
-        
-        private_dns_zone = api_server_profile.get('privateDnsZone', '')
-        
-        if private_dns_zone and private_dns_zone != 'system':
-            # Analyze custom private DNS zone
+        try:
+            # Create DNS analyzer instance with Azure CLI executor
+            dns_analyzer = DNSAnalyzer(
+                cluster_info=self.cluster_info,
+                azure_cli=self.azure_cli_executor
+            )
+            
+            # Run analysis
+            self.private_dns_analysis = dns_analyzer.analyze()
+            
+            # Get findings from analyzer
+            analyzer_findings = dns_analyzer.get_findings()
+            
+            # Convert findings to dict format for compatibility with existing report generation
+            for finding in analyzer_findings:
+                finding_dict = finding.to_dict()
+                self.findings.append(finding_dict)
+            
+            # Store analyzer instance for later use (e.g., in connectivity tests)
+            self.dns_analyzer = dns_analyzer
+            
+        except Exception as e:
+            self.logger.error(f"Failed to analyze DNS configuration: {e}")
+            # Initialize with empty structure to prevent downstream errors
             self.private_dns_analysis = {
-                "type": "custom",
-                "privateDnsZone": private_dns_zone,
-                "analysis": "Custom private DNS zone configured"
+                "type": "none",
+                "isPrivateCluster": False,
+                "privateDnsZone": None,
+                "analysis": f"Error analyzing DNS: {e}"
             }
-        else:
-            # System-managed private DNS zone
-            self.private_dns_analysis = {
-                "type": "system",
-                "privateDnsZone": "system",
-                "analysis": "System-managed private DNS zone"
-            }
+            self.dns_analyzer = None
     
     def analyze_api_server_access(self):
         """Analyze API server access configuration including authorized IP ranges"""
@@ -2108,6 +2140,11 @@ EXAMPLES:
     
     def _validate_private_dns_resolution(self, nslookup_output, hostname):
         """Validate that DNS resolution returns a private IP address for private clusters"""
+        # Use the modular DNS analyzer if available
+        if hasattr(self, 'dns_analyzer') and self.dns_analyzer:
+            return self.dns_analyzer.validate_private_dns_resolution(nslookup_output, hostname)
+        
+        # Fallback to inline validation if DNS analyzer not available
         import ipaddress
         import re
         
@@ -2124,17 +2161,29 @@ EXAMPLES:
                 return False  # DNS resolution failed completely
             
             # Parse nslookup output to extract IP addresses
-            # Look for lines like "Address: 10.1.2.3" or "10.1.2.3"
             ip_pattern = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
             found_ips = re.findall(ip_pattern, output_to_parse)
             
             if not found_ips:
                 return False  # No IP addresses found
             
-            # Filter out DNS server IPs (usually the first IP listed)
-            # DNS server IPs are typically shown as "Server: 10.1.0.10" or "Address: 10.1.0.10#53"
-            dns_server_pattern = r'(?:Server:|Address:)\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})(?:#\d+)?'
-            dns_server_ips = set(re.findall(dns_server_pattern, output_to_parse))
+            # Filter out DNS server IPs more carefully
+            lines = output_to_parse.split('\n')
+            dns_server_ips = set()
+            in_server_section = False
+            
+            for i, line in enumerate(lines):
+                line_lower = line.lower()
+                if 'server:' in line_lower:
+                    in_server_section = True
+                    server_ips = re.findall(ip_pattern, line)
+                    dns_server_ips.update(server_ips)
+                elif in_server_section and 'address:' in line_lower:
+                    server_ips = re.findall(ip_pattern, line)
+                    dns_server_ips.update(server_ips)
+                    in_server_section = False
+                elif 'non-authoritative answer' in line_lower or 'name:' in line_lower:
+                    in_server_section = False
             
             # Check resolved IPs (excluding DNS server IPs)
             resolved_ips = [ip for ip in found_ips if ip not in dns_server_ips]
@@ -2146,24 +2195,19 @@ EXAMPLES:
             for ip_str in resolved_ips:
                 try:
                     ip = ipaddress.ip_address(ip_str)
-                    # Check if this is a private IP address
                     if ip.is_private:
-                        # Additional validation: private IPs for AKS API servers are typically in specific ranges
-                        # Common AKS private IP ranges: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
                         return True
                 except ValueError:
-                    continue  # Skip invalid IP addresses
+                    continue
             
-            # If we found IP addresses but none were private, this indicates the issue
             return False
             
         except Exception as e:
-            # If we can't parse the output, be conservative and check for any error indicators
+            # If we can't parse the output, be conservative
             dns_error_patterns = [
                 'nxdomain', 'servfail', 'refused', "can't find", 
                 'no servers could be reached', 'communications error', 'timed out'
             ]
-            # Return False if any error patterns are found, True only if none are found
             return not any(error in nslookup_output.lower() for error in dns_error_patterns)
     
     def analyze_misconfigurations(self):
@@ -2260,7 +2304,8 @@ EXAMPLES:
         if not getattr(self, '_cluster_stopped', False):
             self._analyze_connectivity_test_results(findings)
         
-        self.findings = findings
+        # Extend existing findings instead of replacing them
+        self.findings.extend(findings)
     
     def _get_cluster_status_error(self):
         """Get detailed cluster error information from status field"""
@@ -2868,7 +2913,7 @@ EXAMPLES:
         else:
             self._print_summary_report()
         
-        print(f"\n✅ AKS network assessment completed successfully!")
+        safe_print(f"\n✅ AKS network assessment completed successfully!")
     
     def _print_summary_report(self):
         """Print summary report"""
@@ -2927,21 +2972,21 @@ EXAMPLES:
         warning_findings = [f for f in self.findings if f.get('severity') == 'warning']
         
         if len(critical_findings) == 0 and len(warning_findings) == 0:
-            print("- ✅ No critical issues detected")
+            safe_print("- ✅  No critical issues detected")
         else:
             # Show critical/error findings
             for finding in critical_findings:
                 # For cluster operation failures, show only the error code in non-verbose mode
                 if finding.get('code') == 'CLUSTER_OPERATION_FAILURE' and finding.get('error_code'):
-                    print(f"- ❌ Cluster failed with error: {finding.get('error_code')}")
+                    safe_print(f"- ❌  Cluster failed with error: {finding.get('error_code')}")
                 else:
                     message = finding.get('message', 'Unknown issue')
-                    print(f"- ❌ {message}")
+                    safe_print(f"- ❌  {message}")
             
             # Show warning findings
             for finding in warning_findings:
                 message = finding.get('message', 'Unknown issue')
-                print(f"- ⚠️ {message}")
+                safe_print(f"- ⚠️  {message}")
         
         print()
         print("Tip: Use --verbose flag for detailed analysis or check the JSON report for complete findings.")
@@ -3061,14 +3106,14 @@ EXAMPLES:
                         print(f"  - **Critical Routes:**")
                         for route in critical_routes:
                             impact = route.get('impact', {})
-                            print(f"    - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) → {route.get('nextHopType', '')} - {impact.get('description', '')}")
+                            safe_print(f"    - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) -> {route.get('nextHopType', '')} - {impact.get('description', '')}")
                 
                 # Show virtual appliance routes summary
                 va_routes = udr_analysis.get("virtualApplianceRoutes", [])
                 if va_routes:
                     print(f"- **Virtual Appliance Routes:** {len(va_routes)}")
                     for route in va_routes:
-                        print(f"  - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) → {route.get('nextHopIpAddress', '')}")
+                        safe_print(f"  - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) -> {route.get('nextHopIpAddress', '')}")
                 
                 print()
             else:
@@ -3158,12 +3203,12 @@ EXAMPLES:
             
             # Inter-node communication status
             status_icon = {
-                'ok': '✅',
-                'potential_issues': '⚠️',
-                'blocked': '❌',
-                'unknown': '❓'
-            }.get(inter_node_status, '❓')
-            print(f"- **Inter-node Communication:** {status_icon} {inter_node_status.replace('_', ' ').title()}")
+                'ok': '[OK]',
+                'potential_issues': '[WARNING]',
+                'blocked': '[ERROR]',
+                'unknown': '[?]'
+            }.get(inter_node_status, '[?]')
+            safe_print(f"- **Inter-node Communication:** {status_icon} {inter_node_status.replace('_', ' ').title()}")
             
             # Show detailed NSG information in verbose mode
             if self.verbose and total_nsgs > 0:
@@ -3178,7 +3223,7 @@ EXAMPLES:
                         custom_rules = len(nsg.get('rules', []))
                         default_rules = len(nsg.get('defaultRules', []))
                         
-                        print(f"- **{subnet_name}** → NSG: {nsg_name}")
+                        safe_print(f"- **{subnet_name}** -> NSG: {nsg_name}")
                         print(f"  - Custom Rules: {custom_rules}, Default Rules: {default_rules}")
                         
                         # Show custom rules
@@ -3301,7 +3346,7 @@ EXAMPLES:
                     print(f"**Recommendation:** {finding.get('recommendation', '')}")
                 print()
         else:
-            print("✅ No issues detected in the network configuration!")
+            safe_print("✅ No issues detected in the network configuration!")
             print()
     
     def run(self):
