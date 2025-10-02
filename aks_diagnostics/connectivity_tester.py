@@ -11,6 +11,7 @@ Handles active connectivity probing from VMSS instances including:
 
 import logging
 import re
+import json
 import ipaddress
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Tuple
@@ -188,7 +189,8 @@ class ConnectivityTester:
             return
 
         # Determine if this is a private cluster
-        is_private = self.cluster_info.get('apiServerAccessProfile', {}).get('enablePrivateCluster', False)
+        api_server_profile = self.cluster_info.get('apiServerAccessProfile') or {}
+        is_private = api_server_profile.get('enablePrivateCluster', False)
         
         # Define connectivity tests
         tests = [
@@ -226,10 +228,48 @@ class ConnectivityTester:
         })
         
         # Execute each test
+        dns_failed = False
         for test in tests:
             self.logger.info(f"  Running test: {test['name']}")
+            
+            # If DNS test failed, skip subsequent tests that require DNS
+            if dns_failed and "DNS" not in test['name']:
+                self.logger.info(f"    Skipping test (DNS resolution failed)")
+                result = {
+                    "test_name": test['name'],
+                    "description": test['description'],
+                    "command": test['command'],
+                    "vmss_name": vmss_instance.vmss_name,
+                    "instance_id": vmss_instance.instance_id,
+                    "computer_name": vmss_instance.computer_name,
+                    "status": "skipped",
+                    "stdout": "",
+                    "stderr": "",
+                    "exit_code": None,
+                    "analysis": "Skipped because DNS resolution failed",
+                    "critical": test.get('critical', False)
+                }
+                self.probe_results["tests"].append(result)
+                self.probe_results["summary"]["total_tests"] += 1
+                self.probe_results["summary"]["errors"] += 1
+                continue
+            
             result = self._execute_vmss_test(vmss_instance, test)
             self.probe_results["tests"].append(result)
+            
+            # Check if DNS test failed
+            if "DNS" in test['name'] and result['status'] == "failed":
+                dns_failed = True
+                self.logger.warning("    DNS resolution failed - subsequent connectivity tests will be skipped")
+            
+            # Log test results in verbose mode
+            self.logger.info(f"    Status: {result['status']}")
+            self.logger.info(f"    Exit Code: {result['exit_code']}")
+            if result.get('stdout'):
+                self.logger.info(f"    Stdout: {result['stdout'][:200]}")  # First 200 chars
+            if result.get('stderr'):
+                self.logger.info(f"    Stderr: {result['stderr'][:200]}")  # First 200 chars
+            self.logger.info(f"    Analysis: {result['analysis']}")
             
             # Update summary
             self.probe_results["summary"]["total_tests"] += 1
@@ -371,7 +411,32 @@ class ConnectivityTester:
                 code = item.get('code', '')
                 msg = item.get('message', '')
                 
-                if code == 'ComponentStatus/StdOut/succeeded':
+                # Handle new format: ProvisioningState/succeeded with embedded stdout/stderr
+                if code.startswith('ProvisioningState/'):
+                    # Parse embedded stdout/stderr from message
+                    # Format: "Enable succeeded: \n[stdout]\n...\n[stderr]\n..."
+                    stdout_match = re.search(r'\[stdout\]\n(.*?)(?:\[stderr\]|$)', msg, re.DOTALL)
+                    stderr_match = re.search(r'\[stderr\]\n(.*?)$', msg, re.DOTALL)
+                    
+                    if stdout_match:
+                        stdout = stdout_match.group(1).strip()
+                    if stderr_match:
+                        stderr = stderr_match.group(1).strip()
+                    
+                    # Check for exit code in message
+                    if 'exitcode' in msg.lower():
+                        match = re.search(r'exitCode["\s:]+(\d+)', msg, re.IGNORECASE)
+                        if match:
+                            exit_code = int(match.group(1))
+                    
+                    # If succeeded and no explicit exit code, assume 0
+                    if '/succeeded' in code.lower() and exit_code == -1:
+                        exit_code = 0
+                    elif '/failed' in code.lower() and exit_code == -1:
+                        exit_code = 1
+                
+                # Handle old format: ComponentStatus codes
+                elif code == 'ComponentStatus/StdOut/succeeded':
                     stdout = msg
                 elif code == 'ComponentStatus/StdErr/succeeded':
                     stderr = msg
@@ -383,6 +448,7 @@ class ConnectivityTester:
             
             # If exit code not found but we have stdout, assume success
             if exit_code == -1 and stdout:
+                exit_code = 0
                 exit_code = 0
             
         except Exception as e:
