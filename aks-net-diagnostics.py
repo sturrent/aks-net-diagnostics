@@ -44,25 +44,10 @@ ALLOWED_AZ_COMMANDS = {
 
 def safe_print(text: str) -> None:
     """
-    Print text with Unicode fallback for Windows console.
-    Replaces emoji with ASCII equivalents if encoding fails.
+    Print text - kept for consistency with previous versions.
+    Now uses ASCII-only characters for maximum compatibility.
     """
-    try:
-        print(text)
-    except UnicodeEncodeError:
-        # Replace common emoji with ASCII equivalents
-        replacements = {
-            '✅': '[OK]',
-            '❌': '[ERROR]',
-            '⚠️': '[WARNING]',
-            '⚡': '[!]',
-            '🔍': '[INFO]',
-            '📊': '[STATS]',
-        }
-        safe_text = text
-        for emoji, ascii_replacement in replacements.items():
-            safe_text = safe_text.replace(emoji, ascii_replacement)
-        print(safe_text)
+    print(text)
 
 
 @dataclass
@@ -1292,10 +1277,10 @@ EXAMPLES:
                 })
             elif prefix_length >= 32:  # Single IP
                 if self.verbose:
-                    self.logger.info(f"    ✅ Specific IP address: {range_cidr}")
+                    self.logger.info(f"    [✓] Specific IP address: {range_cidr}")
             else:  # Reasonable range
                 if self.verbose:
-                    self.logger.info(f"    ✅ Reasonable range: {range_cidr} ({num_addresses} addresses)")
+                    self.logger.info(f"    [✓] Reasonable range: {range_cidr} ({num_addresses} addresses)")
             
             # Check for private IP ranges in authorized list
             if network.is_private:
@@ -1318,10 +1303,10 @@ EXAMPLES:
         disable_run_command = self.api_server_access_analysis["disableRunCommand"]
         if disable_run_command:
             if self.verbose:
-                self.logger.info("  ✅ Run command is disabled (enhanced security)")
+                self.logger.info("  [✓] Run command is disabled (enhanced security)")
         else:
             if self.verbose:
-                self.logger.info("  📝 Run command is enabled")
+                self.logger.info("  [NOTE] Run command is enabled")
         
         # Check private cluster configuration
         is_private = self.api_server_access_analysis["privateCluster"]
@@ -1370,14 +1355,14 @@ EXAMPLES:
         
         if access_model == "private":
             implications.extend([
-                "✅ API server is isolated from the internet",
-                "✅ Access only from resources within the VNet or peered networks",
+                "[✓] API server is isolated from the internet",
+                "[✓] Access only from resources within the VNet or peered networks",
                 "📝 Requires VPN or ExpressRoute for external access",
                 "📝 Private DNS zone required for name resolution"
             ])
         elif access_model == "restricted_public":
             implications.extend([
-                "✅ API server access is restricted to specified IP ranges",
+                "[✓] API server access is restricted to specified IP ranges",
                 "⚠️ API server is still exposed to the internet",
                 "📝 Users/services must access from authorized IP ranges",
                 "📝 Node-to-API traffic must originate from authorized ranges"
@@ -1460,7 +1445,7 @@ EXAMPLES:
                         "recommendation": "Add cluster outbound IPs to authorized ranges or nodes cannot access the API server"
                     })
             else:
-                implications.append("✅ All outbound IPs are in authorized ranges")
+                implications.append("[✓] All outbound IPs are in authorized ranges")
                 
         except Exception as e:
             implications.append(f"⚠️ Could not validate outbound IP authorization: {e}")
@@ -1797,7 +1782,7 @@ EXAMPLES:
             
             if test_result['status'] == 'passed':
                 self.api_probe_results['summary']['passed'] += 1
-                self.logger.info(f"    ✅ PASSED: {test['name']}")
+                self.logger.info(f"    [✓] PASSED: {test['name']}")
             elif test_result['status'] == 'failed':
                 self.api_probe_results['summary']['failed'] += 1
                 self.logger.info(f"    ❌ FAILED: {test['name']} - {test_result.get('error', 'Unknown error')}")
@@ -2913,7 +2898,7 @@ EXAMPLES:
         else:
             self._print_summary_report()
         
-        safe_print(f"\n✅ AKS network assessment completed successfully!")
+        print(f"\n[✓] AKS network assessment completed successfully!")
     
     def _print_summary_report(self):
         """Print summary report"""
@@ -2972,21 +2957,21 @@ EXAMPLES:
         warning_findings = [f for f in self.findings if f.get('severity') == 'warning']
         
         if len(critical_findings) == 0 and len(warning_findings) == 0:
-            safe_print("- ✅  No critical issues detected")
+            print("- [✓] No critical issues detected")
         else:
             # Show critical/error findings
             for finding in critical_findings:
                 # For cluster operation failures, show only the error code in non-verbose mode
                 if finding.get('code') == 'CLUSTER_OPERATION_FAILURE' and finding.get('error_code'):
-                    safe_print(f"- ❌  Cluster failed with error: {finding.get('error_code')}")
+                    print(f"- [✗] Cluster failed with error: {finding.get('error_code')}")
                 else:
                     message = finding.get('message', 'Unknown issue')
-                    safe_print(f"- ❌  {message}")
+                    print(f"- [✗] {message}")
             
             # Show warning findings
             for finding in warning_findings:
                 message = finding.get('message', 'Unknown issue')
-                safe_print(f"- ⚠️  {message}")
+                print(f"- [!] {message}")
         
         print()
         print("Tip: Use --verbose flag for detailed analysis or check the JSON report for complete findings.")
@@ -3137,7 +3122,7 @@ EXAMPLES:
                 
                 print(f"- **Tests Executed:** {total}")
                 if passed > 0:
-                    print(f"- **✅ Passed:** {passed}")
+                    print(f"- **[✓] Passed:** {passed}")
                 if failed > 0:
                     print(f"- **❌ Failed:** {failed}")
                 if errors > 0:
@@ -3150,8 +3135,8 @@ EXAMPLES:
                         print("\n**Test Details:**")
                         for test in tests:
                             status_icon = {
-                                'passed': '✅',
-                                'failed': '❌', 
+                                'passed': '[✓]',
+                                'failed': '[✗]', 
                                 'error': '⚠️'
                             }.get(test.get('status'), '❓')
                             
@@ -3237,7 +3222,7 @@ EXAMPLES:
                                 dest = rule.get('destinationAddressPrefix', 'Unknown')
                                 ports = rule.get('destinationPortRange', 'Unknown')
                                 
-                                access_icon = '✅' if access.lower() == 'allow' else '❌'
+                                access_icon = '[✓]' if access.lower() == 'allow' else '❌'
                                 print(f"    - {access_icon} **{rule.get('name', 'Unknown')}** (Priority: {priority})")
                                 print(f"      - {direction} {protocol} to {dest} on ports {ports}")
                 
@@ -3281,7 +3266,7 @@ EXAMPLES:
                                 dest = rule.get('destinationAddressPrefix', 'Unknown')
                                 ports = rule.get('destinationPortRange', 'Unknown')
                                 
-                                access_icon = '✅' if access.lower() == 'allow' else '❌'
+                                access_icon = '[✓]' if access.lower() == 'allow' else '❌'
                                 print(f"    - {access_icon} **{rule.get('name', 'Unknown')}** (Priority: {priority})")
                                 print(f"      - {direction} {protocol} to {dest} on ports {ports}")
                 
@@ -3346,7 +3331,7 @@ EXAMPLES:
                     print(f"**Recommendation:** {finding.get('recommendation', '')}")
                 print()
         else:
-            safe_print("✅ No issues detected in the network configuration!")
+            print("[✓] No issues detected in the network configuration!")
             print()
     
     def run(self):
