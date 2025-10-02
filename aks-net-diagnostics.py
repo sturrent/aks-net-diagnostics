@@ -957,7 +957,7 @@ EXAMPLES:
     
     def check_api_connectivity(self):
         """Check API server connectivity using ConnectivityTester module"""
-        tester = ConnectivityTester(self.cluster_info, self.run_azure_cli, self.dns_analyzer)
+        tester = ConnectivityTester(self.cluster_info, self.run_azure_cli, self.dns_analyzer, verbose=self.verbose)
         self.api_probe_results = tester.test_connectivity(enable_probes=self.probe_test)
     
     def analyze_misconfigurations(self):
@@ -1902,7 +1902,8 @@ EXAMPLES:
                             status_icon = {
                                 'passed': '[OK]',
                                 'failed': '[ERROR]', 
-                                'error': '[!]'
+                                'error': '[!]',
+                                'skipped': '[SKIP]'
                             }.get(test.get('status'), '[?]')
                             
                             test_name = test.get('test_name', 'Unknown Test')
@@ -1910,31 +1911,19 @@ EXAMPLES:
                             exit_code = test.get('exit_code', -1)
                             print(f"- {status_icon} **{test_name}** (VMSS: {vmss_name}, Exit Code: {exit_code})")
                             
-                            if test.get('status') in ['failed', 'error'] and test.get('error'):
-                                print(f"  - Error: {test['error']}")
+                            # Show full test result in JSON format with compacted newlines
+                            import json
+                            test_copy = test.copy()
+                            # Compact stdout and stderr for single-line display
+                            if test_copy.get('stdout'):
+                                test_copy['stdout'] = test_copy['stdout'].replace('\n', '\\n')
+                            if test_copy.get('stderr'):
+                                test_copy['stderr'] = test_copy['stderr'].replace('\n', '\\n')
                             
-                            if test.get('execution_time'):
-                                print(f"  - Execution time: {test['execution_time']}s")
-                            
-                            # Show command output for debugging
-                            stdout = test.get('output', '')
-                            stderr = test.get('stderr', '')
-                            
-                            if stdout.strip():
-                                print(f"  - **Command Output (stdout):**")
-                                # Indent each line of output
-                                for line in stdout.strip().split('\n'):
-                                    print(f"    ```")
-                                    print(f"    {line}")
-                                    print(f"    ```")
-                            
-                            if stderr.strip():
-                                print(f"  - **Command Error Output (stderr):**")
-                                # Indent each line of stderr
-                                for line in stderr.strip().split('\n'):
-                                    print(f"    ```")
-                                    print(f"    {line}")
-                                    print(f"    ```")
+                            print(f"  - **Full Test Result:**")
+                            print(f"    ```json")
+                            print(f"    {json.dumps(test_copy, indent=2)}")
+                            print(f"    ```")
                 print()
         
         # NSG Analysis Results

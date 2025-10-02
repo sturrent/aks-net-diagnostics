@@ -275,7 +275,44 @@ Address: 168.63.129.16
         self.assertEqual(instance.instance_id, '0')
         self.assertEqual(instance.computer_name, 'test-node-0')
         self.assertEqual(instance.provisioning_state, 'Succeeded')
+    
+    def test_curl_error_detection(self):
+        """Test that curl errors are properly detected even with exit code 0"""
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        
+        # Simulate response with curl SSL error (like the firewall blocking case)
+        test = {
+            "name": "API Server HTTPS Connectivity",
+            "expected_keywords": ["200", "401", "403"],
+            "critical": True
+        }
+        
+        result = {
+            "test_name": "API Server HTTPS Connectivity",
+            "status": "error",
+            "stdout": "",
+            "stderr": "",
+            "exit_code": None,
+            "analysis": "",
+            "critical": True
+        }
+        
+        response = {
+            "value": [
+                {
+                    "code": "ProvisioningState/succeeded",
+                    "message": "Enable succeeded: \n[stdout]\n\n[stderr]\n* Connected to server (1.2.3.4) port 443 (#0)\n* error:0A000126:SSL routines::unexpected eof while reading\ncurl: (35) error:0A000126:SSL routines::unexpected eof while reading"
+                }
+            ]
+        }
+        
+        analyzed_result = tester._analyze_test_result(test, response, result)
+        
+        # Should detect the curl error and mark as failed
+        self.assertEqual(analyzed_result['status'], 'failed')
+        self.assertIn('curl error', analyzed_result['analysis'].lower())
 
 
 if __name__ == '__main__':
     unittest.main()
+

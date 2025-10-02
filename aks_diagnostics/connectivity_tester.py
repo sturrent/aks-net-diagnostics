@@ -29,7 +29,7 @@ class VMSSInstance:
 class ConnectivityTester:
     """Manages connectivity testing from AKS VMSS instances"""
     
-    def __init__(self, cluster_info: Dict[str, Any], run_azure_cli_func, dns_analyzer=None):
+    def __init__(self, cluster_info: Dict[str, Any], run_azure_cli_func, dns_analyzer=None, verbose: bool = False):
         """
         Initialize Connectivity Tester
         
@@ -37,10 +37,12 @@ class ConnectivityTester:
             cluster_info: AKS cluster information dictionary
             run_azure_cli_func: Function to execute Azure CLI commands
             dns_analyzer: Optional DNS analyzer for private DNS validation
+            verbose: Whether to show detailed test output
         """
         self.cluster_info = cluster_info
         self.run_azure_cli = run_azure_cli_func
         self.dns_analyzer = dns_analyzer
+        self.verbose = verbose
         self.logger = logging.getLogger("aks_net_diagnostics.connectivity_tester")
         
         self.probe_results = {
@@ -64,10 +66,10 @@ class ConnectivityTester:
         Returns:
             Dictionary containing probe results and summary
         """
-        self.logger.info("Checking API connectivity...")
+        self.logger.info("Checking node outbound connectivity...")
         
         if not enable_probes:
-            self.logger.info("API connectivity probing disabled. Use --probe-test to enable active connectivity checks.")
+            self.logger.info("Node outbound connectivity probing disabled. Use --probe-test to enable active connectivity checks.")
             return self.probe_results
         
         # Check if cluster is stopped
@@ -203,13 +205,6 @@ class ConnectivityTester:
                 "critical": True
             },
             {
-                "name": "API Server TCP Connectivity",
-                "description": "Test TCP connection to API server on port 443",
-                "command": f"nc -zv -w 5 {api_server_fqdn} 443",
-                "expected_keywords": ["succeeded", "open", "connected"],
-                "critical": True
-            },
-            {
                 "name": "API Server HTTPS Connectivity",
                 "description": "Test HTTPS connection to API server",
                 "command": f"curl -k -s -o /dev/null -w '%{{http_code}}' --connect-timeout 10 https://{api_server_fqdn}:443",
@@ -218,25 +213,25 @@ class ConnectivityTester:
             }
         ]
         
-        # Add Internet connectivity test
+        # Add Internet connectivity test (using same test as AKS node provisioning)
         tests.append({
             "name": "Internet Connectivity",
-            "description": "Test outbound internet connectivity",
-            "command": "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 https://www.microsoft.com",
-            "expected_keywords": ["200", "301", "302"],
+            "description": "Test outbound internet connectivity to MCR (Microsoft Container Registry)",
+            "command": "curl -v --insecure --proxy-insecure https://mcr.microsoft.com/v2/",
+            "expected_keywords": ["200", "401", "unauthorized"],
             "critical": False
         })
         
         # Execute each test
         dns_failed = False
         for test in tests:
-            self.logger.info(f"  Running test: {test['name']}")
+            test_name = test['name']
             
             # If DNS test failed, skip subsequent tests that require DNS
-            if dns_failed and "DNS" not in test['name']:
-                self.logger.info(f"    Skipping test (DNS resolution failed)")
+            if dns_failed and "DNS" not in test_name:
+                self.logger.info(f"  Test: {test_name} - SKIPPED (DNS resolution failed)")
                 result = {
-                    "test_name": test['name'],
+                    "test_name": test_name,
                     "description": test['description'],
                     "command": test['command'],
                     "vmss_name": vmss_instance.vmss_name,
@@ -254,22 +249,29 @@ class ConnectivityTester:
                 self.probe_results["summary"]["errors"] += 1
                 continue
             
+            self.logger.info(f"  Running test: {test_name}")
             result = self._execute_vmss_test(vmss_instance, test)
             self.probe_results["tests"].append(result)
             
             # Check if DNS test failed
-            if "DNS" in test['name'] and result['status'] == "failed":
+            if "DNS" in test_name and result['status'] == "failed":
                 dns_failed = True
                 self.logger.warning("    DNS resolution failed - subsequent connectivity tests will be skipped")
             
-            # Log test results in verbose mode
-            self.logger.info(f"    Status: {result['status']}")
-            self.logger.info(f"    Exit Code: {result['exit_code']}")
-            if result.get('stdout'):
-                self.logger.info(f"    Stdout: {result['stdout'][:200]}")  # First 200 chars
-            if result.get('stderr'):
-                self.logger.info(f"    Stderr: {result['stderr'][:200]}")  # First 200 chars
-            self.logger.info(f"    Analysis: {result['analysis']}")
+            # Log test results based on verbosity
+            # In verbose mode, show full JSON with compacted output
+            if self.verbose:
+                # Create a copy of result with compacted stdout/stderr for logging
+                log_result = result.copy()
+                if log_result.get('stdout'):
+                    log_result['stdout'] = log_result['stdout'].replace('\n', '\\n')
+                if log_result.get('stderr'):
+                    log_result['stderr'] = log_result['stderr'].replace('\n', '\\n')
+                self.logger.info(f"    Test result: {json.dumps(log_result, indent=2)}")
+            else:
+                # In non-verbose mode, just show summary
+                status = result['status'].upper()
+                self.logger.info(f"    Result: {status} - {result['analysis']}")
             
             # Update summary
             self.probe_results["summary"]["total_tests"] += 1
@@ -366,7 +368,40 @@ class ConnectivityTester:
         result["stderr"] = parsed["stderr"]
         result["exit_code"] = parsed["exit_code"]
         
-        # Analyze result
+        # Check for curl errors in stderr even if exit code is 0
+        # This handles cases where curl reports errors but exits with code 0
+        curl_error_patterns = [
+            r'curl: \(\d+\)',  # curl: (35), curl: (7), etc.
+            r'error:\w+:',      # error:0A000126:SSL routines::...
+            r'Failed to connect',
+            r'Connection refused',
+            r'Connection timed out',
+            r'Could not resolve host'
+        ]
+        
+        has_curl_error = False
+        if result["stderr"]:
+            stderr_lower = result["stderr"].lower()
+            for pattern in curl_error_patterns:
+                if re.search(pattern, result["stderr"], re.IGNORECASE):
+                    has_curl_error = True
+                    # Extract the error message for better analysis
+                    curl_error_match = re.search(r'curl: \((\d+)\) (.+?)(?:\\n|$)', result["stderr"])
+                    if curl_error_match:
+                        error_code = curl_error_match.group(1)
+                        error_msg = curl_error_match.group(2)
+                        result["analysis"] = f"curl error ({error_code}): {error_msg}"
+                    else:
+                        # Look for SSL/TLS errors
+                        ssl_error_match = re.search(r'(error:\w+:[^\\]+)', result["stderr"])
+                        if ssl_error_match:
+                            result["analysis"] = f"Connection failed: {ssl_error_match.group(1)}"
+                        else:
+                            result["analysis"] = "Connection failed with curl error"
+                    result["status"] = "failed"
+                    return result
+        
+        # Analyze result based on exit code
         if parsed["exit_code"] == 0:
             # Check for expected output
             expected_keywords = test.get("expected_keywords", [])
