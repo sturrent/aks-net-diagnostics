@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Any, Tuple
 # Import new modular components
 from aks_diagnostics.nsg_analyzer import NSGAnalyzer
 from aks_diagnostics.dns_analyzer import DNSAnalyzer
+from aks_diagnostics.route_table_analyzer import RouteTableAnalyzer
 from aks_diagnostics.azure_cli import AzureCLIExecutor
 from aks_diagnostics.cache import CacheManager
 
@@ -569,9 +570,9 @@ EXAMPLES:
         description = effective_summary["description"]
         
         if effective_summary["overridden_by_udr"]:
-            self.logger.info(f"  ⚠️  {description}")
+            self.logger.warning(f"  [!]  {description}")
             if effective_summary["load_balancer_ips"]:
-                self.logger.info(f"    Load Balancer IPs (not effective): {', '.join(effective_summary['load_balancer_ips'])}")
+                self.logger.warning(f"    Load Balancer IPs (not effective): {', '.join(effective_summary['load_balancer_ips'])}")
         else:
             if mechanism == "loadBalancer" and effective_summary["load_balancer_ips"]:
                 for ip in effective_summary["load_balancer_ips"]:
@@ -588,9 +589,9 @@ EXAMPLES:
             level = warning["level"]
             message = warning["message"]
             if level == "error":
-                self.logger.info(f"    ❌ {message}")
+                self.logger.error(f"    [ERROR] {message}")
             else:
-                self.logger.info(f"    ⚠️  {message}")
+                self.logger.warning(f"    [!]  {message}")
     
     def _analyze_load_balancer_outbound(self):
         """Analyze load balancer outbound configuration"""
@@ -805,264 +806,9 @@ EXAMPLES:
             return None
 
     def _analyze_node_subnet_udrs(self):
-        """Analyze User Defined Routes on node subnets"""
-        self.logger.info("    Analyzing UDRs on node subnets...")
-        
-        udr_analysis = {
-            "routeTables": [],
-            "criticalRoutes": [],
-            "virtualApplianceRoutes": [],
-            "internetRoutes": []
-        }
-        
-        # Get unique subnet IDs from agent pools
-        subnet_ids = set()
-        for pool in self.agent_pools:
-            subnet_id = pool.get('vnetSubnetId')
-            if subnet_id and subnet_id != "null":
-                subnet_ids.add(subnet_id)
-        
-        if not subnet_ids:
-            self.logger.info("    No VNet-integrated node pools found")
-            return udr_analysis
-        
-        # Analyze each subnet for route tables
-        for subnet_id in subnet_ids:
-            try:
-                subnet_info = self._get_subnet_details(subnet_id)
-                if not subnet_info:
-                    continue
-                
-                route_table = subnet_info.get('routeTable')
-                if route_table and route_table.get('id'):
-                    route_table_id = route_table['id']
-                    self.logger.info(f"    Found route table: {route_table_id}")
-                    
-                    # Get route table details
-                    rt_analysis = self._analyze_route_table(route_table_id, subnet_id)
-                    if rt_analysis:
-                        udr_analysis["routeTables"].append(rt_analysis)
-                        
-                        # Categorize routes
-                        for route in rt_analysis.get("routes", []):
-                            self._categorize_route(route, udr_analysis)
-                else:
-                    self.logger.info(f"    No route table associated with subnet: {subnet_id}")
-                    
-            except Exception as e:
-                self.logger.info(f"    Error analyzing subnet {subnet_id}: {e}")
-        
-        return udr_analysis
-    
-    def _get_subnet_details(self, subnet_id):
-        """Get detailed information about a subnet"""
-        try:
-            # Parse subnet ID to extract components
-            parts = subnet_id.split('/')
-            if len(parts) < 11:
-                return None
-            
-            subscription_id = parts[2]
-            resource_group = parts[4]
-            vnet_name = parts[8]
-            subnet_name = parts[10]
-            
-            # Get subnet details
-            cmd = ['network', 'vnet', 'subnet', 'show', 
-                   '--subscription', subscription_id,
-                   '-g', resource_group, 
-                   '--vnet-name', vnet_name, 
-                   '-n', subnet_name, 
-                   '-o', 'json']
-            
-            return self.run_azure_cli(cmd)
-            
-        except Exception as e:
-            self.logger.info(f"    Error getting subnet details for {subnet_id}: {e}")
-            return None
-    
-    def _analyze_route_table(self, route_table_id, subnet_id):
-        """Analyze a specific route table"""
-        try:
-            # Parse route table ID
-            parts = route_table_id.split('/')
-            if len(parts) < 9:
-                return None
-            
-            subscription_id = parts[2]
-            resource_group = parts[4]
-            route_table_name = parts[8]
-            
-            # Get route table details
-            cmd = ['network', 'route-table', 'show',
-                   '--subscription', subscription_id,
-                   '-g', resource_group,
-                   '-n', route_table_name,
-                   '-o', 'json']
-            
-            route_table_info = self.run_azure_cli(cmd)
-            
-            if not route_table_info:
-                return None
-            
-            analysis = {
-                "id": route_table_id,
-                "name": route_table_name,
-                "resourceGroup": resource_group,
-                "associatedSubnet": subnet_id,
-                "routes": [],
-                "disableBgpRoutePropagation": route_table_info.get('disableBgpRoutePropagation', False)
-            }
-            
-            # Analyze each route
-            routes = route_table_info.get('routes', [])
-            for route in routes:
-                route_analysis = self._analyze_individual_route(route)
-                if route_analysis:
-                    analysis["routes"].append(route_analysis)
-            
-            self.logger.info(f"    Route table {route_table_name} has {len(routes)} route(s)")
-            
-            return analysis
-            
-        except Exception as e:
-            self.logger.info(f"    Error analyzing route table {route_table_id}: {e}")
-            return None
-    
-    def _analyze_individual_route(self, route):
-        """Analyze an individual route"""
-        try:
-            next_hop_type = route.get('nextHopType', '')
-            address_prefix = route.get('addressPrefix', '')
-            next_hop_ip = route.get('nextHopIpAddress', '')
-            route_name = route.get('name', '')
-            
-            analysis = {
-                "name": route_name,
-                "addressPrefix": address_prefix,
-                "nextHopType": next_hop_type,
-                "nextHopIpAddress": next_hop_ip,
-                "provisioningState": route.get('provisioningState', ''),
-                "impact": self._assess_route_impact(address_prefix, next_hop_type, next_hop_ip)
-            }
-            
-            return analysis
-            
-        except Exception as e:
-            self.logger.info(f"    Error analyzing route: {e}")
-            return None
-    
-    def _assess_route_impact(self, address_prefix, next_hop_type, next_hop_ip):
-        """Assess the potential impact of a route on AKS connectivity"""
-        impact = {
-            "severity": "info",
-            "description": "",
-            "affectedTraffic": []
-        }
-        
-        # Check for default route (0.0.0.0/0)
-        if address_prefix == "0.0.0.0/0":
-            if next_hop_type == "VirtualAppliance":
-                impact["severity"] = "high"
-                impact["description"] = "Default route redirects ALL internet traffic to virtual appliance"
-                impact["affectedTraffic"] = ["internet", "container_registry", "azure_services", "api_server"]
-            elif next_hop_type == "None":
-                impact["severity"] = "critical"
-                impact["description"] = "Default route drops ALL internet traffic (blackhole)"
-                impact["affectedTraffic"] = ["internet", "container_registry", "azure_services", "api_server"]
-            elif next_hop_type == "Internet":
-                impact["severity"] = "low"
-                impact["description"] = "Explicit default route to internet (may override system routes)"
-                impact["affectedTraffic"] = ["internet"]
-        
-        # Check for Azure service routes
-        elif self._is_azure_service_prefix(address_prefix):
-            if next_hop_type == "VirtualAppliance":
-                impact["severity"] = "medium"
-                impact["description"] = f"Azure service traffic ({address_prefix}) redirected to virtual appliance"
-                impact["affectedTraffic"] = ["azure_services"]
-            elif next_hop_type == "None":
-                impact["severity"] = "high"
-                impact["description"] = f"Azure service traffic ({address_prefix}) blocked"
-                impact["affectedTraffic"] = ["azure_services"]
-        
-        # Check for container registry routes
-        elif self._is_container_registry_prefix(address_prefix):
-            if next_hop_type == "VirtualAppliance":
-                impact["severity"] = "medium"
-                impact["description"] = f"Container registry traffic ({address_prefix}) redirected to virtual appliance"
-                impact["affectedTraffic"] = ["container_registry"]
-            elif next_hop_type == "None":
-                impact["severity"] = "high"
-                impact["description"] = f"Container registry traffic ({address_prefix}) blocked"
-                impact["affectedTraffic"] = ["container_registry"]
-        
-        # Check for private network routes
-        elif self._is_private_network_prefix(address_prefix):
-            if next_hop_type == "VirtualAppliance":
-                impact["severity"] = "low"
-                impact["description"] = f"Private network traffic ({address_prefix}) redirected to virtual appliance"
-                impact["affectedTraffic"] = ["private_network"]
-        
-        return impact
-    
-    def _is_azure_service_prefix(self, address_prefix):
-        """Check if address prefix covers Azure service endpoints"""
-        # Common Azure service IP ranges (simplified check)
-        azure_prefixes = [
-            "13.", "20.", "23.", "40.", "52.", "104.", "168.", "191."
-        ]
-        return any(address_prefix.startswith(prefix) for prefix in azure_prefixes)
-    
-    def _is_container_registry_prefix(self, address_prefix):
-        """Check if address prefix covers container registry endpoints"""
-        # Microsoft Container Registry typically uses these ranges
-        mcr_prefixes = [
-            "20.81.", "20.117.", "52.159.", "52.168."
-        ]
-        return any(address_prefix.startswith(prefix) for prefix in mcr_prefixes)
-    
-    def _is_private_network_prefix(self, address_prefix):
-        """Check if address prefix is for private networks"""
-        private_prefixes = ["10.", "172.16.", "172.17.", "172.18.", "172.19.", 
-                           "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
-                           "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
-                           "172.30.", "172.31.", "192.168."]
-        return any(address_prefix.startswith(prefix) for prefix in private_prefixes)
-    
-    def _categorize_route(self, route, udr_analysis):
-        """Categorize routes based on their impact"""
-        impact = route.get("impact", {})
-        severity = impact.get("severity", "info")
-        next_hop_type = route.get("nextHopType", "")
-        address_prefix = route.get("addressPrefix", "")
-        
-        # Critical routes (high impact on connectivity)
-        if severity in ["critical", "high"]:
-            udr_analysis["criticalRoutes"].append({
-                "name": route.get("name", ""),
-                "addressPrefix": address_prefix,
-                "nextHopType": next_hop_type,
-                "impact": impact
-            })
-        
-        # Virtual appliance routes
-        if next_hop_type == "VirtualAppliance":
-            udr_analysis["virtualApplianceRoutes"].append({
-                "name": route.get("name", ""),
-                "addressPrefix": address_prefix,
-                "nextHopIpAddress": route.get("nextHopIpAddress", ""),
-                "impact": impact
-            })
-        
-        # Internet routes
-        if address_prefix == "0.0.0.0/0" or next_hop_type == "Internet":
-            udr_analysis["internetRoutes"].append({
-                "name": route.get("name", ""),
-                "addressPrefix": address_prefix,
-                "nextHopType": next_hop_type,
-                "impact": impact
-            })
+        """Analyze User Defined Routes on node subnets using RouteTableAnalyzer"""
+        analyzer = RouteTableAnalyzer(self.agent_pools, self.azure_cli_executor)
+        return analyzer.analyze()
     
     def analyze_vmss_configuration(self):
         """Analyze VMSS network configuration"""
@@ -1229,7 +975,7 @@ EXAMPLES:
         
         self.logger.info(f"  - Found {len(authorized_ranges)} authorized IP range(s):")
         for range_cidr in authorized_ranges:
-            self.logger.info(f"    • {range_cidr}")
+            self.logger.info(f"    * {range_cidr}")
         
         self.api_server_access_analysis["analysis"]["ipRangeRestriction"] = "enabled"
         self.api_server_access_analysis["analysis"]["rangeCount"] = len(authorized_ranges)
@@ -1277,16 +1023,16 @@ EXAMPLES:
                 })
             elif prefix_length >= 32:  # Single IP
                 if self.verbose:
-                    self.logger.info(f"    [✓] Specific IP address: {range_cidr}")
+                    self.logger.info(f"    [OK] Specific IP address: {range_cidr}")
             else:  # Reasonable range
                 if self.verbose:
-                    self.logger.info(f"    [✓] Reasonable range: {range_cidr} ({num_addresses} addresses)")
+                    self.logger.info(f"    [OK] Reasonable range: {range_cidr} ({num_addresses} addresses)")
             
             # Check for private IP ranges in authorized list
             if network.is_private:
                 self.api_server_access_analysis["analysis"]["containsPrivateRanges"] = True
                 if self.verbose:
-                    self.logger.info(f"    📝 Private IP range detected: {range_cidr}")
+                    self.logger.info(f"    [NOTE] Private IP range detected: {range_cidr}")
             
         except Exception as e:
             self.api_server_access_analysis["securityFindings"].append({
@@ -1303,7 +1049,7 @@ EXAMPLES:
         disable_run_command = self.api_server_access_analysis["disableRunCommand"]
         if disable_run_command:
             if self.verbose:
-                self.logger.info("  [✓] Run command is disabled (enhanced security)")
+                self.logger.info("  [OK] Run command is disabled (enhanced security)")
         else:
             if self.verbose:
                 self.logger.info("  [NOTE] Run command is enabled")
@@ -1355,17 +1101,17 @@ EXAMPLES:
         
         if access_model == "private":
             implications.extend([
-                "[✓] API server is isolated from the internet",
-                "[✓] Access only from resources within the VNet or peered networks",
-                "📝 Requires VPN or ExpressRoute for external access",
-                "📝 Private DNS zone required for name resolution"
+                "[OK] API server is isolated from the internet",
+                "[OK] Access only from resources within the VNet or peered networks",
+                "[NOTE] Requires VPN or ExpressRoute for external access",
+                "[NOTE] Private DNS zone required for name resolution"
             ])
         elif access_model == "restricted_public":
             implications.extend([
-                "[✓] API server access is restricted to specified IP ranges",
-                "⚠️ API server is still exposed to the internet",
-                "📝 Users/services must access from authorized IP ranges",
-                "📝 Node-to-API traffic must originate from authorized ranges"
+                "[OK] API server access is restricted to specified IP ranges",
+                "[!] API server is still exposed to the internet",
+                "[NOTE] Users/services must access from authorized IP ranges",
+                "[NOTE] Node-to-API traffic must originate from authorized ranges"
             ])
             
             # Check if outbound IPs are in authorized ranges
@@ -1374,10 +1120,10 @@ EXAMPLES:
                 
         else:  # unrestricted_public
             implications.extend([
-                "⚠️ API server is publicly accessible from any IP",
-                "⚠️ No network-level access restrictions",
-                "📝 Security relies entirely on authentication and RBAC",
-                "📝 Consider implementing IP restrictions for enhanced security"
+                "[!] API server is publicly accessible from any IP",
+                "[!] No network-level access restrictions",
+                "[NOTE] Security relies entirely on authentication and RBAC",
+                "[NOTE] Consider implementing IP restrictions for enhanced security"
             ])
         
         return implications
@@ -1422,9 +1168,9 @@ EXAMPLES:
             if unauthorized_outbound_ips:
                 # Special handling for managedNATGateway outbound type
                 if outbound_type == 'managedNATGateway':
-                    implications.append(f"ℹ️ Outbound IPs not in authorized ranges: {', '.join(unauthorized_outbound_ips)}")
-                    implications.append("📝 Note: With managedNATGateway, nodes use internal Azure networking for API access")
-                    implications.append("📝 Authorized IP ranges primarily restrict external access, not internal node communication")
+                    implications.append(f"[i] Outbound IPs not in authorized ranges: {', '.join(unauthorized_outbound_ips)}")
+                    implications.append("[NOTE] Note: With managedNATGateway, nodes use internal Azure networking for API access")
+                    implications.append("[NOTE] Authorized IP ranges primarily restrict external access, not internal node communication")
                     
                     # Add to security findings with informational severity for managedNATGateway
                     self.api_server_access_analysis["securityFindings"].append({
@@ -1434,8 +1180,8 @@ EXAMPLES:
                         "recommendation": "Monitor actual connectivity with --probe-test. Consider adding NAT Gateway IPs to authorized ranges if external tools need to match node source IPs, but this is not required for cluster functionality."
                     })
                 else:
-                    implications.append(f"❌ Outbound IPs not in authorized ranges: {', '.join(unauthorized_outbound_ips)}")
-                    implications.append("📝 Nodes may not be able to communicate with API server")
+                    implications.append(f"X Outbound IPs not in authorized ranges: {', '.join(unauthorized_outbound_ips)}")
+                    implications.append("[NOTE] Nodes may not be able to communicate with API server")
                     
                     # Add to security findings with critical severity for other outbound types
                     self.api_server_access_analysis["securityFindings"].append({
@@ -1445,10 +1191,10 @@ EXAMPLES:
                         "recommendation": "Add cluster outbound IPs to authorized ranges or nodes cannot access the API server"
                     })
             else:
-                implications.append("[✓] All outbound IPs are in authorized ranges")
+                implications.append("[OK] All outbound IPs are in authorized ranges")
                 
         except Exception as e:
-            implications.append(f"⚠️ Could not validate outbound IP authorization: {e}")
+            implications.append(f"[!] Could not validate outbound IP authorization: {e}")
     
     def _get_current_client_ip(self):
         """Attempt to get the current client's public IP address"""
@@ -1782,13 +1528,13 @@ EXAMPLES:
             
             if test_result['status'] == 'passed':
                 self.api_probe_results['summary']['passed'] += 1
-                self.logger.info(f"    [✓] PASSED: {test['name']}")
+                self.logger.info(f"    [OK] PASSED: {test['name']}")
             elif test_result['status'] == 'failed':
                 self.api_probe_results['summary']['failed'] += 1
-                self.logger.info(f"    ❌ FAILED: {test['name']} - {test_result.get('error', 'Unknown error')}")
+                self.logger.info(f"    X FAILED: {test['name']} - {test_result.get('error', 'Unknown error')}")
             else:
                 self.api_probe_results['summary']['errors'] += 1
-                self.logger.info(f"    ⚠️ ERROR: {test['name']} - {test_result.get('error', 'Execution error')}")
+                self.logger.info(f"    [!] ERROR: {test['name']} - {test_result.get('error', 'Execution error')}")
             
             return test_result
                 
@@ -1805,7 +1551,7 @@ EXAMPLES:
             self.api_probe_results['tests'].append(error_result)
             self.api_probe_results['summary']['total_tests'] += 1
             self.api_probe_results['summary']['errors'] += 1
-            self.logger.info(f"    ⚠️ ERROR: {test['name']} - {str(e)}")
+            self.logger.info(f"    [!] ERROR: {test['name']} - {str(e)}")
             return error_result
     
     def _run_vmss_command(self, cmd: List[str]) -> Any:
@@ -2885,7 +2631,7 @@ EXAMPLES:
                 
                 # Set secure file permissions (readable/writable by owner only)
                 os.chmod(self.json_out, DEFAULT_FILE_PERMISSIONS)
-                self.logger.info(f"📄 JSON report saved to: {self.json_out}")
+                self.logger.info(f"[DOC] JSON report saved to: {self.json_out}")
             except Exception as e:
                 self.logger.error(f"Failed to save JSON report: {e}")
     
@@ -2898,7 +2644,7 @@ EXAMPLES:
         else:
             self._print_summary_report()
         
-        print(f"\n[✓] AKS network assessment completed successfully!")
+        print(f"\n[OK] AKS network assessment completed successfully!")
     
     def _print_summary_report(self):
         """Print summary report"""
@@ -2957,16 +2703,16 @@ EXAMPLES:
         warning_findings = [f for f in self.findings if f.get('severity') == 'warning']
         
         if len(critical_findings) == 0 and len(warning_findings) == 0:
-            print("- [✓] No critical issues detected")
+            print("- [OK] No critical issues detected")
         else:
             # Show critical/error findings
             for finding in critical_findings:
                 # For cluster operation failures, show only the error code in non-verbose mode
                 if finding.get('code') == 'CLUSTER_OPERATION_FAILURE' and finding.get('error_code'):
-                    print(f"- [✗] Cluster failed with error: {finding.get('error_code')}")
+                    print(f"- [ERROR] Cluster failed with error: {finding.get('error_code')}")
                 else:
                     message = finding.get('message', 'Unknown issue')
-                    print(f"- [✗] {message}")
+                    print(f"- [ERROR] {message}")
             
             # Show warning findings
             for finding in warning_findings:
@@ -3058,7 +2804,7 @@ EXAMPLES:
             else:
                 print("- **Access Restrictions:** None (unrestricted public access)")
                 if not is_private:
-                    print("  ⚠️ API server is accessible from any IP address on the internet")
+                    print("  [!] API server is accessible from any IP address on the internet")
         
         print()
         
@@ -3122,11 +2868,11 @@ EXAMPLES:
                 
                 print(f"- **Tests Executed:** {total}")
                 if passed > 0:
-                    print(f"- **[✓] Passed:** {passed}")
+                    print(f"- **[OK] Passed:** {passed}")
                 if failed > 0:
-                    print(f"- **❌ Failed:** {failed}")
+                    print(f"- **X Failed:** {failed}")
                 if errors > 0:
-                    print(f"- **⚠️ Errors:** {errors}")
+                    print(f"- **[!] Errors:** {errors}")
                 
                 # Show detailed results if verbose
                 if self.verbose:
@@ -3135,10 +2881,10 @@ EXAMPLES:
                         print("\n**Test Details:**")
                         for test in tests:
                             status_icon = {
-                                'passed': '[✓]',
-                                'failed': '[✗]', 
-                                'error': '⚠️'
-                            }.get(test.get('status'), '❓')
+                                'passed': '[OK]',
+                                'failed': '[ERROR]', 
+                                'error': '[!]'
+                            }.get(test.get('status'), '[?]')
                             
                             test_name = test.get('test_name', 'Unknown Test')
                             vmss_name = test.get('vmss_name', 'unknown')
@@ -3222,7 +2968,7 @@ EXAMPLES:
                                 dest = rule.get('destinationAddressPrefix', 'Unknown')
                                 ports = rule.get('destinationPortRange', 'Unknown')
                                 
-                                access_icon = '[✓]' if access.lower() == 'allow' else '❌'
+                                access_icon = '[OK]' if access.lower() == 'allow' else 'X'
                                 print(f"    - {access_icon} **{rule.get('name', 'Unknown')}** (Priority: {priority})")
                                 print(f"      - {direction} {protocol} to {dest} on ports {ports}")
                 
@@ -3266,13 +3012,13 @@ EXAMPLES:
                                 dest = rule.get('destinationAddressPrefix', 'Unknown')
                                 ports = rule.get('destinationPortRange', 'Unknown')
                                 
-                                access_icon = '[✓]' if access.lower() == 'allow' else '❌'
+                                access_icon = '[OK]' if access.lower() == 'allow' else 'X'
                                 print(f"    - {access_icon} **{rule.get('name', 'Unknown')}** (Priority: {priority})")
                                 print(f"      - {direction} {protocol} to {dest} on ports {ports}")
                 
                 # Show blocking rules details
                 if blocking_rules:
-                    print("\n**⚠️ Potentially Blocking Rules:**")
+                    print("\n**[!] Potentially Blocking Rules:**")
                     for rule in blocking_rules:
                         print(f"- **{rule.get('ruleName', 'Unknown')}** in NSG {rule.get('nsgName', 'Unknown')}")
                         print(f"  - Priority: {rule.get('priority', 'Unknown')}")
@@ -3298,13 +3044,13 @@ EXAMPLES:
             # Display findings summary
             print("**Findings Summary:**")
             if critical_count > 0:
-                print(f"- 🔴 {critical_count} Critical issue(s)")
+                print(f"- [!] {critical_count} Critical issue(s)")
             if error_count > 0:
-                print(f"- ❌ {error_count} Error issue(s)")
+                print(f"- X {error_count} Error issue(s)")
             if warning_count > 0:
-                print(f"- ⚠️ {warning_count} Warning issue(s)")
+                print(f"- [!] {warning_count} Warning issue(s)")
             if info_count > 0:
-                print(f"- ℹ️ {info_count} Informational finding(s)")
+                print(f"- [i] {info_count} Informational finding(s)")
             print()
             
             # Display critical and error issues first
@@ -3318,11 +3064,11 @@ EXAMPLES:
             # Display all findings in detail
             for finding in self.findings:
                 severity_icon = {
-                    'critical': '🔴',
-                    'error': '❌',
-                    'warning': '⚠️',
-                    'info': 'ℹ️'
-                }.get(finding.get('severity', 'info'), 'ℹ️')
+                    'critical': '[!]',
+                    'error': 'X',
+                    'warning': '[!]',
+                    'info': '[i]'
+                }.get(finding.get('severity', 'info'), '[i]')
                 
                 print(f"### {severity_icon} {finding.get('code', 'UNKNOWN')}")
                 print(f"**Severity:** {finding.get('severity', 'info').upper()}")
@@ -3331,7 +3077,7 @@ EXAMPLES:
                     print(f"**Recommendation:** {finding.get('recommendation', '')}")
                 print()
         else:
-            print("[✓] No issues detected in the network configuration!")
+            print("[OK] No issues detected in the network configuration!")
             print()
     
     def run(self):
