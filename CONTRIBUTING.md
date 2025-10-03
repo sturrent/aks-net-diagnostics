@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to AKS Network Diagnostics! This document provides guidelines and information for contributors.
 
-## 🎯 Ways to Contribute
+## Ways to Contribute
 
 - **Bug Reports**: Found a bug? Open an issue with details and steps to reproduce
 - **Feature Requests**: Have an idea? Open an issue describing the use case
@@ -10,7 +10,7 @@ Thank you for your interest in contributing to AKS Network Diagnostics! This doc
 - **Documentation**: Improve README, code comments, or examples
 - **Testing**: Add test cases or improve test coverage
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -43,7 +43,7 @@ git commit -m "feat: Add my feature"
 git push origin feature/my-feature
 ```
 
-## 📋 Contribution Guidelines
+## Contribution Guidelines
 
 ### Code Style
 
@@ -152,7 +152,7 @@ refactor: Extract data collection to separate module
 - [ ] `.pyz` build tested (`python build_zipapp.py && python aks-net-diagnostics.pyz --help`)
 - [ ] No breaking changes (or clearly documented if unavoidable)
 
-## 🏗️ Building the Distribution
+## Building the Distribution
 
 ### Creating the Single-File Distribution
 
@@ -215,7 +215,7 @@ The release workflow is defined in `.github/workflows/release.yml`.
 - [ ] Commit messages follow conventional commits format
 - [ ] No merge conflicts with main branch
 
-## 🏗️ Architecture Guidelines
+## Architecture Guidelines
 
 ### Adding a New Analyzer
 
@@ -277,7 +277,7 @@ class MyAnalyzer(BaseAnalyzer):
 - **tests/**: Corresponding test files
 - **Main script**: Orchestration only, no business logic
 
-## 🐛 Reporting Bugs
+## Reporting Bugs
 
 ### Before Submitting
 
@@ -315,7 +315,7 @@ What actually happened.
 - JSON report (if applicable)
 ```
 
-## 💡 Feature Requests
+## Feature Requests
 
 ### Before Submitting
 
@@ -366,7 +366,7 @@ pytest -x
 - Test both success and failure scenarios
 - Test edge cases
 
-## 📚 Documentation
+## Documentation
 
 ### Code Documentation
 

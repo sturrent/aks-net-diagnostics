@@ -4,7 +4,7 @@ This document provides detailed technical information about the AKS Network Diag
 
 > **Note**: This document uses Mermaid diagrams for visual representation. If viewing on GitHub, the diagrams will render automatically. For local viewing, use a Markdown viewer that supports Mermaid (VS Code with Markdown Preview Mermaid Support extension, or online viewers like https://mermaid.live).
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
 ### Design Philosophy
 
@@ -105,7 +105,7 @@ sequenceDiagram
     Report-->>User: Console output + JSON
 ```
 
-## 📦 Module Breakdown
+## Module Breakdown
 
 ### Core Modules
 
@@ -339,7 +339,7 @@ Enhanced Findings → ReportGenerator → Console Output
                                   → JSON Report (optional)
 ```
 
-## 🎯 Design Principles
+## Design Principles
 
 ### 1. Single Responsibility Principle
 Each module has one clear purpose:
@@ -377,7 +377,7 @@ Errors in one analyzer don't break others:
 - Graceful degradation
 - Partial results still useful
 
-## 🔧 Extension Points
+## Extension Points
 
 ### Adding a New Analyzer
 
@@ -511,7 +511,7 @@ def test_component_when_condition_then_result(self):
     self.assertEqual(expected, result)
 ```
 
-## 📊 Performance Considerations
+## Performance Considerations
 
 ### Caching Strategy
 - **Command-based**: Cache keyed by Azure CLI command
@@ -549,7 +549,7 @@ def test_component_when_condition_then_result(self):
 - JSON reports don't include secrets
 - File permissions: 0600 (owner read/write only)
 
-## � Distribution & Build Process
+## Distribution & Build Process
 
 ### Single-File Distribution (.pyz)
 
@@ -633,8 +633,8 @@ sequenceDiagram
 | **Import Issues** | Possible (PYTHONPATH) | None (all bundled) |
 | **Updates** | `git pull` | Download new .pyz |
 | **Portability** | Requires directory structure | Single file, easy to share |
-| **Development** | ✅ Ideal | ❌ Not editable |
-| **End Users** | ❌ Complex | ✅ Simple |
+| **Development** | Ideal | Not editable |
+| **End Users** | Complex | Simple |
 
 #### Build Script Details
 
@@ -650,7 +650,7 @@ The `build_zipapp.py` script:
 **Compression**: gzip-compressed ZIP archive  
 **Interpreter**: Shebang for `/usr/bin/env python3`
 
-## �📝 Code Quality Metrics
+## Code Quality Metrics
 
 ### Maintainability
 - **Main Script**: 451 lines (focused on orchestration)
@@ -664,12 +664,12 @@ The `build_zipapp.py` script:
 - **Documentation**: README, ARCHITECTURE, CONTRIBUTING
 
 ### Quality Standards
-- ✅ Type hints on all functions
-- ✅ Docstrings on all public methods
-- ✅ Consistent error handling
-- ✅ Uniform logging patterns
-- ✅ No code duplication
-- ✅ Clear naming conventions
+- Type hints on all functions
+- Docstrings on all public methods
+- Consistent error handling
+- Uniform logging patterns
+- No code duplication
+- Clear naming conventions
 
 ---
 

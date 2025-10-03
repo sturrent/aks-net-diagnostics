@@ -6,19 +6,20 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 [![Azure CLI 2.0+](https://img.shields.io/badge/Azure%20CLI-2.0+-blue.svg)](https://docs.microsoft.com/en-us/cli/azure/)
 [![Tests](https://img.shields.io/badge/tests-147%20passing-success.svg)](tests/)
 
-## 🎯 Key Features
+## Key Features
 
-- **🔍 Comprehensive Analysis**: 9 specialized analyzers for deep network diagnostics
-- **🚀 Active Testing**: Optional connectivity probes from cluster nodes
-- **📊 Multiple Output Formats**: Console summary + detailed verbose + JSON export
-- **🛡️ Security Focused**: NSG compliance, inter-node traffic validation
-- **🔧 Production Ready**: 147 unit tests, modular architecture
-- **📝 Detailed Reports**: Actionable recommendations for every finding
+- **Comprehensive Analysis**: 9 specialized analyzers for deep network diagnostics
+- **Active Testing**: Optional connectivity probes from cluster nodes
+- **Multiple Output Formats**: Console summary + detailed verbose + JSON export
+- **Security Focused**: NSG compliance, inter-node traffic validation
+- **Production Ready**: 147 unit tests, modular architecture
+- **Detailed Reports**: Actionable recommendations for every finding
 
-## 📚 Table of Contents
+## Table of Contents
 
-- [Quick Start](#quick-start)
 - [Prerequisites](#prerequisites)
+- [Installation & Usage](#installation--usage)
+- [Quick Start](#quick-start)
 - [What It Analyzes](#what-it-analyzes)
 - [Architecture](#architecture)
 - [Command Options](#command-options)
@@ -28,25 +29,6 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
 
-## 🚀 Quick Start
-
-```bash
-# Basic analysis (console output only)
-python aks-net-diagnostics.py -n my-cluster -g my-resource-group
-
-# Detailed output
-python aks-net-diagnostics.py -n my-cluster -g my-resource-group --verbose
-
-# Save JSON report (auto-generated filename)
-python aks-net-diagnostics.py -n my-cluster -g my-resource-group --json-report
-
-# Save JSON report with custom filename
-python aks-net-diagnostics.py -n my-cluster -g my-resource-group --json-report my-report.json
-
-# Include connectivity testing from cluster nodes
-python aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
-```
-
 ## Prerequisites
 
 - **Python 3.7+** - [Download](https://www.python.org/downloads/)
@@ -54,9 +36,9 @@ python aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
 - **Azure Authentication**: Run `az login` before using the tool
 - **Permissions**: Reader access to AKS cluster and related network resources
 
-## � Installation & Usage
+## Installation & Usage
 
-### Option 1: Single-File Distribution (Recommended for Quick Use)
+### Option 1: Single-File Distribution (Recommended for End Users)
 
 Download and run the pre-built `.pyz` file from [Releases](https://github.com/sturrent/aks-net-diagnostics/releases):
 
@@ -73,10 +55,10 @@ chmod +x aks-net-diagnostics.pyz
 ```
 
 **Advantages:**
-- ✅ Single file (~57 KB)
-- ✅ No installation required
-- ✅ Just download and run
-- ✅ All modules bundled inside
+- Single file (~57 KB)
+- No installation required
+- Just download and run
+- All modules bundled inside
 
 ### Option 2: Clone Repository (For Development/Customization)
 
@@ -95,25 +77,50 @@ python build_zipapp.py
 # Creates: aks-net-diagnostics.pyz
 ```
 
-## �🔎 What It Analyzes
+## Quick Start
+
+```bash
+# Using the .pyz file (recommended)
+python aks-net-diagnostics.pyz -n my-cluster -g my-resource-group
+
+# OR using the source code
+python aks-net-diagnostics.py -n my-cluster -g my-resource-group
+
+# With verbose output
+python aks-net-diagnostics.pyz -n my-cluster -g my-resource-group --verbose
+
+# Save JSON report with auto-generated filename
+python aks-net-diagnostics.pyz -n my-cluster -g my-resource-group --json-report
+
+# Save JSON report with custom filename
+python aks-net-diagnostics.pyz -n my-cluster -g my-resource-group --json-report my-report.json
+
+# Include connectivity testing from cluster nodes
+python aks-net-diagnostics.pyz -n my-cluster -g my-resource-group --probe-test
+```
+
+## What It Analyzes
 
 ### Network Components
-- ✅ **VNet Configuration**: Topology, address spaces, peerings
-- ✅ **Outbound Connectivity**: LoadBalancer, NAT Gateway, User Defined Routes
-- ✅ **DNS Configuration**: Azure DNS, Custom DNS, Private DNS zones
-- ✅ **VMSS Network Profiles**: Node subnet assignments, NIC configurations
+
+- **VNet Configuration**: Topology, address spaces, peerings
+- **Outbound Connectivity**: LoadBalancer, NAT Gateway, User Defined Routes
+- **DNS Configuration**: Azure DNS, Custom DNS, Private DNS zones
+- **VMSS Network Profiles**: Node subnet assignments, NIC configurations
 
 ### Security & Access Control
-- ✅ **NSG Rules**: Required AKS traffic, blocking rules, inter-node communication
-- ✅ **API Server Access**: Authorized IP ranges, private endpoints
-- ✅ **Route Tables**: UDR impact on AKS management traffic
+
+- **NSG Rules**: Required AKS traffic, blocking rules, inter-node communication
+- **API Server Access**: Authorized IP ranges, private endpoints
+- **Route Tables**: UDR impact on AKS management traffic
 
 ### Active Testing (Optional)
-- ✅ **DNS Resolution**: MCR, API server hostname lookup from nodes
-- ✅ **HTTPS Connectivity**: Container registry, API server reachability
-- ✅ **Network Path**: Validates full network path from nodes to Azure services
 
-## 🏗️ Architecture
+- **DNS Resolution**: MCR, API server hostname lookup from nodes
+- **HTTPS Connectivity**: Container registry, API server reachability
+- **Network Path**: Validates full network path from nodes to Azure services
+
+## Architecture
 
 The tool uses a **modular architecture** with specialized analyzers:
 
@@ -127,7 +134,7 @@ The tool uses a **modular architecture** with specialized analyzers:
 
 For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)
 
-## 🚨 Common Issues Detected
+## Common Issues Detected
 
 | Issue | Severity | Description |
 |-------|----------|-------------|
@@ -140,7 +147,7 @@ For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)
 | Private DNS zone VNet link missing | Critical | Private cluster name resolution fails |
 | Custom DNS not forwarding to Azure DNS | Critical | Private endpoints unreachable |
 
-## 💻 Command Options
+## Command Options
 
 | Option | Description | Example |
 |--------|-------------|---------|
@@ -152,7 +159,7 @@ For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)
 | `--subscription <ID>` | Override Azure subscription | `--subscription abc-123` |
 | `--cache` | Enable response caching (faster reruns) | `--cache` |
 
-## 📖 Usage Examples
+## Usage Examples
 
 ### Basic Analysis
 
@@ -310,21 +317,21 @@ When using `--probe-test`, the tool executes connectivity tests directly from cl
 ### Connectivity Tests
 
 **Test Results:**
-- ✅ MCR DNS Resolution - PASSED
+- [PASS] MCR DNS Resolution - PASSED
   - Resolved to: 150.171.70.10, 150.171.69.10
   
-- ✅ Internet Connectivity - PASSED
+- [PASS] Internet Connectivity - PASSED
   - Successfully connected to mcr.microsoft.com
   
-- ✅ API Server DNS Resolution - PASSED
+- [PASS] API Server DNS Resolution - PASSED
   - Resolved to: 10.0.0.10
   
-- ❌ API Server HTTPS Connectivity - FAILED
+- [FAIL] API Server HTTPS Connectivity - FAILED
   - Error: Connection timeout after 15s
   - Possible causes: Firewall blocking, NSG rules, routing issues
 ```
 
-## 📁 Output Files
+## Output Files
 
 ### Console Output
 
@@ -371,13 +378,13 @@ Generated with `--json-report`, contains:
 }
 ```
 
-## 🛠️ Development
+## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing guidelines, and contribution process.
 
 For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## ❓ Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
