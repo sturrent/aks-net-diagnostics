@@ -53,31 +53,81 @@ python aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
 
 ## Sample Output
 
+### Example: Private Cluster with DNS Issues
+
+```bash
+python aks-net-diagnostics.py -g my-resource-group -n my-private-cluster --no-json --verbose
+```
+
+**Output:**
+
 ```text
-# AKS Network Assessment Summary
+# AKS Network Assessment Report
 
-**Cluster:** my-cluster (Succeeded)
-**Resource Group:** my-rg
+**Cluster:** my-private-cluster
+**Resource Group:** my-resource-group
+**Generated:** 2025-10-03 14:17:24 UTC
 
-**Configuration:**
-- Network Plugin: azure
-- Outbound Type: managedNATGateway
-- Private Cluster: false
+## Cluster Overview
 
-**Outbound Configuration:**
-- NAT Gateway IPs: 4.205.231.XX
+| Property | Value |
+|----------|-------|
+| Provisioning State | Failed |
+| Power State | Running |
+| Network Plugin | azure |
+| Outbound Type | loadBalancer |
+| Private Cluster | true |
 
-**API Server Security:**
-- Authorized IP Ranges: 100.65.190.XX/32
+## Network Configuration
+
+### API Server Access
+- **Type:** Private cluster
+- **Private FQDN:** my-cluster-xxx.privatelink.eastus.azmk8s.io
+- **Private DNS Zone:** system
+- **Access Restrictions:** None (unrestricted public access)
+
+### Outbound Connectivity
+- **Type:** loadBalancer
+- **Effective Public IPs:** 20.10.5.100
+
+### Network Security Group (NSG) Analysis
+- **NSGs Analyzed:** 2
+- **Issues Found:** 0
+- **Inter-node Communication:** [OK] Ok
+
+**Subnet NSGs:**
+- **aks-subnet** -> NSG: my-subnet-nsg-eastus
+  - Custom Rules: 0, Default Rules: 6
+
+**NIC NSGs:**
+- **my-nodepool-nsg** (used by: aks-nodepool1-vmss)
+  - Custom Rules: 0, Default Rules: 6
+
+## Findings
 
 **Findings Summary:**
-- [!] 1 Critical issue(s)
+- [!] 4 Critical issue(s)
 
 **Critical Issues:**
-- Cluster outbound IPs not in authorized IP ranges
 
- JSON report: aks-net-diagnostics_my-cluster_20250902_233045.json
+### [!] PRIVATE_DNS_MISCONFIGURED
+**Message:** Private cluster is using custom DNS servers (10.1.0.10) that cannot resolve Azure private DNS zones
+**Recommendation:** Configure DNS forwarding to 168.63.129.16 for '*.privatelink.*.azmk8s.io'
+
+### [!] CLUSTER_OPERATION_FAILURE
+**Message:** Cluster failed with error: VMExtensionProvisioningError - agents are unable to resolve Kubernetes API server name
+**Recommendation:** Check Azure Activity Log and custom DNS configuration
+
+### [!] NODE_POOL_FAILURE
+**Message:** Node pools in failed state: nodepool1
+**Recommendation:** Check node pool configuration and Azure Activity Log
+
+### [!] PDNS_DNS_HOST_VNET_LINK_MISSING
+**Message:** DNS server 10.1.0.10 is hosted in VNet hub-vnet but this VNet is not linked to private DNS zone
+**Recommendation:** Link VNet hub-vnet to private DNS zone for proper DNS resolution
 ```
+
+This example shows the tool detecting a common private cluster misconfiguration where custom DNS servers aren't properly configured to resolve Azure private DNS zones.
 
 ## Active Connectivity Tests
 
