@@ -402,20 +402,41 @@ class NSGAnalyzer(BaseAnalyzer):
         return len(overriding_rules) > 0, overriding_rules
     
     def _rules_overlap(self, deny_rule: Dict[str, Any], allow_rule: Dict[str, Any]) -> bool:
-        """Check if an allow rule overlaps with a deny rule for AKS traffic."""
-        # Check destination overlap
+        """
+        Check if an allow rule overlaps with a deny rule for AKS traffic.
+        
+        This method now properly validates that the allow rule actually covers
+        the specific traffic that AKS needs, not just that it has a higher priority.
+        """
+        # Check destination overlap with proper service tag semantics
         deny_dest = deny_rule.get('destinationAddressPrefix', '').lower()
         allow_dest = allow_rule.get('destinationAddressPrefix', '').lower()
         
-        aks_destinations = ['*', 'internet', 'azurecloud', 'microsoftcontainerregistry']
-        
         dest_overlap = False
-        if allow_dest in aks_destinations:
+        
+        # Allow rule with '*' covers everything
+        if allow_dest == '*':
             dest_overlap = True
-        elif deny_dest in ['*', 'internet'] and allow_dest in ['azurecloud', 'microsoftcontainerregistry']:
+        # Allow rule with same destination as deny
+        elif allow_dest == deny_dest:
             dest_overlap = True
-        elif deny_dest in aks_destinations and allow_dest == deny_dest:
-            dest_overlap = True
+        # Special case: Internet traffic requirements
+        elif deny_dest == 'internet':
+            # For Internet-blocking rules, only these service tags actually help:
+            # - Internet (explicit allow)
+            # - AzureContainerRegistry (covers MCR)
+            # - * (covers everything)
+            # NOTE: AzureCloud does NOT cover general Internet destinations like MCR
+            if allow_dest in ['internet', 'azurecontainerregistry']:
+                dest_overlap = True
+        # If deny is wildcard, allow must also be wildcard
+        elif deny_dest == '*':
+            if allow_dest in ['*', 'internet', 'azurecloud', 'azurecontainerregistry']:
+                dest_overlap = True
+        # AzureCloud covers Azure-specific services but not general Internet
+        elif deny_dest in ['azurecloud', 'microsoftcontainerregistry', 'azurecontainerregistry']:
+            if allow_dest in ['*', 'azurecloud', 'azurecontainerregistry']:
+                dest_overlap = True
         
         if not dest_overlap:
             return False
