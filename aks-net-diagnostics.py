@@ -131,8 +131,8 @@ class AKSNetworkDiagnostics:
 EXAMPLES:
   %(prog)s -n my-aks-cluster -g my-resource-group
   %(prog)s -n my-cluster -g my-rg --subscription 12345678-1234-1234-1234-123456789012
-  %(prog)s -n my-cluster -g my-rg --probe-test --json-out custom-report.json
-  %(prog)s -n my-cluster -g my-rg --verbose --no-json
+  %(prog)s -n my-cluster -g my-rg --probe-test --json-report custom-report.json
+  %(prog)s -n my-cluster -g my-rg --verbose --json-report
             """
         )
         
@@ -147,10 +147,8 @@ EXAMPLES:
                           help='Azure subscription ID (overrides current context)')
         parser.add_argument('--probe-test', action='store_true',
                           help='Enable active connectivity checks from VMSS instances (WARNING: Executes commands inside cluster nodes)')
-        parser.add_argument('--json-out',
-                          help='Output JSON report to file (default: auto-generated filename)')
-        parser.add_argument('--no-json', action='store_true',
-                          help='Skip JSON report generation')
+        parser.add_argument('--json-report', nargs='?', const='auto', metavar='FILENAME',
+                          help='Save JSON report to file (optional: specify filename, default: auto-generated)')
         parser.add_argument('--verbose', action='store_true',
                           help='Show detailed console output (default: summary only)')
         parser.add_argument('--cache', action='store_true',
@@ -169,8 +167,7 @@ EXAMPLES:
             self.subscription = None
             
         self.probe_test = args.probe_test
-        self.json_out = args.json_out
-        self.no_json = args.no_json
+        self.json_report = args.json_report
         self.verbose = args.verbose
         self.cache = args.cache
         
@@ -182,15 +179,16 @@ EXAMPLES:
         )
         self.azure_cli_executor = AzureCLIExecutor(cache_manager=self.cache_manager)
         
-        # Auto-generate JSON filename if not disabled and not specified
-        if not self.no_json and not self.json_out:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # Sanitize cluster name for filename
-            safe_cluster_name = self._sanitize_filename(self.aks_name)
-            self.json_out = f"aks-net-diagnostics_{safe_cluster_name}_{timestamp}.json"
-        elif self.json_out:
-            # Validate user-provided filename
-            self.json_out = self._validate_output_path(self.json_out)
+        # Handle JSON output filename
+        if self.json_report:
+            if self.json_report == 'auto':
+                # Auto-generate filename when --json-report used without argument
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_cluster_name = self._sanitize_filename(self.aks_name)
+                self.json_report = f"aks-net-diagnostics_{safe_cluster_name}_{timestamp}.json"
+            else:
+                # Validate user-provided filename
+                self.json_report = self._validate_output_path(self.json_report)
     
     def _validate_azure_cli_command(self, cmd: List[str]) -> None:
         """Validate Azure CLI command to prevent injection attacks"""
@@ -1640,17 +1638,17 @@ EXAMPLES:
         # Output console report
         self._print_console_report()
         
-        # Output JSON report if not disabled
-        if not self.no_json and self.json_out:
+        # Output JSON report if requested
+        if self.json_report:
             try:
                 # Create file with secure permissions (owner read/write only)
                 import stat
-                with open(self.json_out, 'w') as f:
+                with open(self.json_report, 'w') as f:
                     json.dump(report_data, f, indent=2)
                 
                 # Set secure file permissions (readable/writable by owner only)
-                os.chmod(self.json_out, DEFAULT_FILE_PERMISSIONS)
-                self.logger.info(f"[DOC] JSON report saved to: {self.json_out}")
+                os.chmod(self.json_report, DEFAULT_FILE_PERMISSIONS)
+                self.logger.info(f"[DOC] JSON report saved to: {self.json_report}")
             except Exception as e:
                 self.logger.error(f"Failed to save JSON report: {e}")
     
@@ -1739,7 +1737,9 @@ EXAMPLES:
                 print(f"- [!] {message}")
         
         print()
-        print("Tip: Use --verbose flag for detailed analysis or check the JSON report for complete findings.")
+        if self.json_report:
+            print(f"[DOC] JSON report saved to: {self.json_report}")
+        print("Tip: Use --verbose flag for detailed analysis")
     
     def _print_verbose_report(self):
         """Print detailed verbose report"""

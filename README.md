@@ -5,11 +5,17 @@ A Python tool for analyzing Azure Kubernetes Service (AKS) network configuration
 ## Quick Start
 
 ```bash
-# Basic analysis
+# Basic analysis (console output only)
 python aks-net-diagnostics.py -n my-cluster -g my-resource-group
 
 # Detailed output
 python aks-net-diagnostics.py -n my-cluster -g my-resource-group --verbose
+
+# Save JSON report (auto-generated filename)
+python aks-net-diagnostics.py -n my-cluster -g my-resource-group --json-report
+
+# Save JSON report with custom filename
+python aks-net-diagnostics.py -n my-cluster -g my-resource-group --json-report my-report.json
 
 # Include connectivity testing from cluster nodes
 python aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
@@ -49,6 +55,7 @@ python aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
 | `-g <GROUP>` | Resource group name (required) |
 | `--verbose` | Show detailed analysis and test results |
 | `--probe-test` | Enable active connectivity tests from nodes |
+| `--json-report [FILENAME]` | Save JSON report (optional: specify filename or auto-generate) |
 | `--subscription <ID>` | Override Azure subscription |
 
 ## Sample Output
@@ -56,7 +63,7 @@ python aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
 ### Example: Private Cluster with DNS Issues
 
 ```bash
-python aks-net-diagnostics.py -g my-resource-group -n my-private-cluster --no-json --verbose
+python aks-net-diagnostics.py -g my-resource-group -n my-private-cluster --verbose
 ```
 
 **Output:**
@@ -142,10 +149,18 @@ Tests use dependency logic: HTTPS tests are skipped if their DNS test fails.
 
 ## Output Files
 
-Reports are automatically saved as JSON:
-- Format: `aks-net-diagnostics_{cluster-name}_{timestamp}.json`
-- Location: Current directory
-- Use `--no-json` to disable
+JSON reports can be optionally saved using `--json-report`:
+
+```bash
+# Auto-generate filename: aks-net-diagnostics_{cluster-name}_{timestamp}.json
+python aks-net-diagnostics.py -n my-cluster -g my-rg --json-report
+
+# Custom filename
+python aks-net-diagnostics.py -n my-cluster -g my-rg --json-report my-report.json
+```
+
+- Location: Current directory (or specify full path)
+- Format: Structured JSON with all findings and analysis
 
 ## Running Tests
 
@@ -170,20 +185,19 @@ The tool uses a modular design with specialized analyzers:
 ## Troubleshooting
 
 **Azure CLI not found:**
+
 ```bash
 az --version  # Verify installation
 ```
 
 **Python not found:**
+
 ```bash
 python --version  # or python3 --version
 ```
 
 **Permission errors on Linux/macOS:**
+
 ```bash
 chmod +x aks-net-diagnostics.py
 ```
-
-## License
-
-MIT License - See [LICENSE](LICENSE) file
