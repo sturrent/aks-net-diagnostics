@@ -28,6 +28,7 @@ from aks_diagnostics.connectivity_tester import ConnectivityTester, VMSSInstance
 from aks_diagnostics.outbound_analyzer import OutboundConnectivityAnalyzer
 from aks_diagnostics.report_generator import ReportGenerator
 from aks_diagnostics.misconfiguration_analyzer import MisconfigurationAnalyzer
+from aks_diagnostics.cluster_data_collector import ClusterDataCollector
 from aks_diagnostics.azure_cli import AzureCLIExecutor
 from aks_diagnostics.cache import CacheManager
 from aks_diagnostics.validators import InputValidator
@@ -225,88 +226,17 @@ EXAMPLES:
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
     
     def fetch_cluster_information(self):
-        """Fetch basic cluster information"""
-        self.logger.info("Fetching cluster information...")
+        """Fetch basic cluster information using ClusterDataCollector"""
+        collector = ClusterDataCollector(self.azure_cli_executor, self.logger)
+        cluster_data = collector.collect_cluster_info(self.aks_name, self.aks_rg)
         
-        # Get cluster info
-        cluster_cmd = ['aks', 'show', '-n', self.aks_name, '-g', self.aks_rg, '-o', 'json']
-        cluster_result = self.azure_cli_executor.execute(cluster_cmd)
-        
-        if not cluster_result or not isinstance(cluster_result, dict):
-            raise ValueError(f"Failed to get cluster information for {self.aks_name}. Please check the cluster name and resource group.")
-        
-        self.cluster_info = cluster_result
-        
-        # Get agent pools
-        agent_pools_cmd = ['aks', 'nodepool', 'list', '-g', self.aks_rg, '--cluster-name', self.aks_name, '-o', 'json']
-        agent_pools_result = self.azure_cli_executor.execute(agent_pools_cmd)
-        
-        if isinstance(agent_pools_result, list):
-            self.agent_pools = agent_pools_result
-        else:
-            self.agent_pools = []
+        self.cluster_info = cluster_data['cluster_info']
+        self.agent_pools = cluster_data['agent_pools']
     
     def analyze_vnet_configuration(self):
-        """Analyze VNet configuration"""
-        self.logger.info("Analyzing VNet configuration...")
-        
-        # Get unique subnet IDs from agent pools
-        subnet_ids = set()
-        for pool in self.agent_pools:
-            subnet_id = pool.get('vnetSubnetId')
-            if subnet_id and subnet_id != "null":
-                subnet_ids.add(subnet_id)
-        
-        if not subnet_ids:
-            self.logger.info("Agent pools use AKS-managed VNet (vnetSubnetId not set). VNet details will be retrieved from VMSS configuration.")
-            return
-        
-        # Analyze each VNet
-        vnets_map = {}
-        for subnet_id in subnet_ids:
-            if not subnet_id:
-                continue
-            
-            # Extract VNet info from subnet ID
-            vnet_match = re.search(r'/virtualNetworks/([^/]+)', subnet_id)
-            if not vnet_match:
-                continue
-            
-            vnet_name = vnet_match.group(1)
-            vnet_rg = subnet_id.split('/')[4]  # Resource group is at index 4 in the resource ID
-            
-            if vnet_name not in vnets_map:
-                # Get VNet information
-                vnet_cmd = ['network', 'vnet', 'show', '-n', vnet_name, '-g', vnet_rg, '-o', 'json']
-                vnet_info = self.azure_cli_executor.execute(vnet_cmd)
-                
-                if vnet_info:
-                    vnets_map[vnet_name] = {
-                        "name": vnet_name,
-                        "resourceGroup": vnet_rg,
-                        "id": vnet_info.get('id', ''),
-                        "addressSpace": vnet_info.get('addressSpace', {}).get('addressPrefixes', []),
-                        "subnets": [],
-                        "peerings": []
-                    }
-                    
-                    # Get VNet peerings
-                    peering_cmd = ['network', 'vnet', 'peering', 'list', '-g', vnet_rg, '--vnet-name', vnet_name, '-o', 'json']
-                    peerings = self.azure_cli_executor.execute(peering_cmd)
-                    
-                    if isinstance(peerings, list):
-                        for peering in peerings:
-                            vnets_map[vnet_name]["peerings"].append({
-                                "name": peering.get('name', ''),
-                                "remoteVirtualNetwork": peering.get('remoteVirtualNetwork', {}).get('id', ''),
-                                "peeringState": peering.get('peeringState', ''),
-                                "allowVirtualNetworkAccess": peering.get('allowVirtualNetworkAccess', False),
-                                "allowForwardedTraffic": peering.get('allowForwardedTraffic', False),
-                                "allowGatewayTransit": peering.get('allowGatewayTransit', False),
-                                "useRemoteGateways": peering.get('useRemoteGateways', False)
-                            })
-        
-        self.vnets_analysis = list(vnets_map.values())
+        """Analyze VNet configuration using ClusterDataCollector"""
+        collector = ClusterDataCollector(self.azure_cli_executor, self.logger)
+        self.vnets_analysis = collector.collect_vnet_info(self.agent_pools)
     
     def analyze_outbound_connectivity(self):
         """Analyze outbound connectivity configuration using OutboundConnectivityAnalyzer"""
@@ -326,52 +256,9 @@ EXAMPLES:
         analyzer = RouteTableAnalyzer(self.agent_pools, self.azure_cli_executor)
         return analyzer.analyze()
     def analyze_vmss_configuration(self):
-        """Analyze VMSS network configuration"""
-        self.logger.info("Analyzing VMSS network configuration...")
-        
-        mc_rg = self.cluster_info.get('nodeResourceGroup', '')
-        if not mc_rg:
-            return
-        
-        # List VMSS in the managed resource group
-        vmss_cmd = ['vmss', 'list', '-g', mc_rg, '-o', 'json']
-        vmss_list = self.azure_cli_executor.execute(vmss_cmd)
-        
-        if not isinstance(vmss_list, list):
-            return
-        
-        for vmss in vmss_list:
-            vmss_name = vmss.get('name', '')
-            if not vmss_name:
-                continue
-            
-            self.logger.info(f"  - Analyzing VMSS: {vmss_name}")
-            
-            # Get VMSS network profile
-            vmss_detail_cmd = ['vmss', 'show', '-n', vmss_name, '-g', mc_rg, '-o', 'json']
-            vmss_detail = self.azure_cli_executor.execute(vmss_detail_cmd)
-            
-            if vmss_detail:
-                network_profile = vmss_detail.get('virtualMachineProfile', {}).get('networkProfile', {})
-                network_interfaces = network_profile.get('networkInterfaceConfigurations', [])
-                
-                # Collect unique subnets for this VMSS
-                unique_subnets = set()
-                for nic in network_interfaces:
-                    ip_configs = nic.get('ipConfigurations', [])
-                    for ip_config in ip_configs:
-                        subnet = ip_config.get('subnet', {})
-                        if subnet and subnet.get('id'):
-                            subnet_name = subnet['id'].split('/')[-1]
-                            unique_subnets.add(subnet_name)
-                
-                # Log unique subnets only once per VMSS
-                for subnet_name in sorted(unique_subnets):
-                    self.logger.info(f"    Found subnet: {subnet_name}")
-                
-                # Store VMSS info with proper structure for NSG analyzer
-                # NSG analyzer expects the full VMSS detail with virtualMachineProfile
-                self.vmss_analysis.append(vmss_detail)
+        """Analyze VMSS network configuration using ClusterDataCollector"""
+        collector = ClusterDataCollector(self.azure_cli_executor, self.logger)
+        self.vmss_analysis = collector.collect_vmss_info(self.cluster_info)
     
     def analyze_nsg_configuration(self):
         """Analyze Network Security Group configuration for AKS nodes using modular NSGAnalyzer"""
