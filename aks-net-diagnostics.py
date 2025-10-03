@@ -3,7 +3,7 @@
 AKS Network Diagnostics Script
 Comprehensive read-only analysis of AKS cluster network configuration
 Author: Azure Networking Diagnostics Generator
-Version: 2.1
+Version: 1.0.0
 """
 
 import argparse
@@ -33,9 +33,10 @@ from aks_diagnostics.azure_cli import AzureCLIExecutor
 from aks_diagnostics.cache import CacheManager
 from aks_diagnostics.validators import InputValidator
 from aks_diagnostics.exceptions import ValidationError
+from aks_diagnostics.__version__ import __version__
 
 # Configuration constants
-SCRIPT_VERSION = "2.1"
+SCRIPT_VERSION = __version__  # Kept for backwards compatibility
 MAX_FILENAME_LENGTH = 50
 MAX_RESOURCE_NAME_LENGTH = 260
 
@@ -149,6 +150,9 @@ EXAMPLES:
                           help='AKS resource group')
         
         # Optional arguments
+        parser.add_argument('--version', action='version',
+                          version=f'%(prog)s {__version__}',
+                          help='Show version and exit')
         parser.add_argument('--subscription',
                           help='Azure subscription ID (overrides current context)')
         parser.add_argument('--probe-test', action='store_true',
