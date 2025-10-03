@@ -74,92 +74,17 @@ python aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
 
 ## 🏗️ Architecture
 
-### Modular Design
+The tool uses a **modular architecture** with specialized analyzers:
 
-The tool uses a **clean, modular architecture** with specialized components:
+- **Data Collection**: Gathers cluster info, VNets, VMSS configurations
+- **Network Analysis**: NSG rules, DNS, routing, outbound connectivity
+- **Security Validation**: API server access, authorized IPs
+- **Active Testing**: Optional connectivity probes from nodes
+- **Reporting**: Console output, JSON export, finding correlation
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    aks-net-diagnostics.py                       │
-│                  (Main Orchestrator - 451 lines)                │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                ┌────────────┴────────────┐
-                │                         │
-        ┌───────▼────────┐       ┌───────▼────────┐
-        │ Data Collection │       │    Analysis    │
-        └───────┬────────┘       └───────┬────────┘
-                │                         │
-    ┌───────────┴───────────┐ ┌──────────┴──────────┐
-    │                       │ │                     │
-┌───▼────────────┐  ┌──────▼─────┐  ┌─────▼──────────┐
-│ClusterData     │  │AzureCLI    │  │NSGAnalyzer     │
-│Collector       │  │Executor    │  │(466 lines)     │
-│(238 lines)     │  │(202 lines) │  └────────────────┘
-└────────────────┘  └────────────┘  
-                                    ┌─────────────────┐
-                                    │DNSAnalyzer      │
-                                    │(341 lines)      │
-                                    └─────────────────┘
-                                    
-                                    ┌─────────────────┐
-                                    │RouteTable       │
-                                    │Analyzer         │
-                                    │(380 lines)      │
-                                    └─────────────────┘
-                                    
-                                    ┌─────────────────┐
-                                    │APIServer        │
-                                    │Analyzer         │
-                                    │(390 lines)      │
-                                    └─────────────────┘
-                                    
-                                    ┌─────────────────┐
-                                    │Connectivity     │
-                                    │Tester           │
-                                    │(607 lines)      │
-                                    └─────────────────┘
-                                    
-                                    ┌─────────────────┐
-                                    │Outbound         │
-                                    │Analyzer         │
-                                    │(455 lines)      │
-                                    └─────────────────┘
+**Key Modules**: NSGAnalyzer, DNSAnalyzer, RouteTableAnalyzer, APIServerAccessAnalyzer, ConnectivityTester, OutboundConnectivityAnalyzer
 
-        ┌───────────────────────────────────────────┐
-        │         Output & Reporting                │
-        ├───────────────────────────────────────────┤
-        │  ReportGenerator (608 lines)              │
-        │  MisconfigurationAnalyzer (653 lines)     │
-        └───────────────────────────────────────────┘
-```
-
-### Module Responsibilities
-
-| Module | Lines | Purpose |
-|--------|-------|---------|
-| **ClusterDataCollector** | 238 | Fetches cluster info, agent pools, VNets, VMSS |
-| **NSGAnalyzer** | 466 | Validates NSG rules, inter-node traffic |
-| **DNSAnalyzer** | 341 | Validates DNS configuration, private zones |
-| **RouteTableAnalyzer** | 380 | Analyzes UDR impact on AKS traffic |
-| **APIServerAccessAnalyzer** | 390 | Validates API server access controls |
-| **ConnectivityTester** | 607 | Active connectivity probes from nodes |
-| **OutboundConnectivityAnalyzer** | 455 | Analyzes outbound configuration |
-| **ReportGenerator** | 608 | Formats and outputs reports |
-| **MisconfigurationAnalyzer** | 653 | Correlates findings, detects issues |
-| **AzureCLIExecutor** | 202 | Azure CLI execution with caching |
-| **CacheManager** | 181 | Response caching for performance |
-| **InputValidator** | 178 | Input validation and sanitization |
-
-**Total:** 4,903 lines across 16 files, **147 unit tests**
-
-### Key Design Principles
-
-1. **Separation of Concerns**: Each module has a single, well-defined responsibility
-2. **Testability**: All modules independently testable with 147 comprehensive tests
-3. **Reusability**: Modules can be used standalone or in other tools
-4. **Maintainability**: Clear interfaces, minimal coupling between modules
-5. **Performance**: Built-in caching reduces redundant Azure CLI calls
+For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## 🚨 Common Issues Detected
 
@@ -407,118 +332,9 @@ Generated with `--json-report`, contains:
 
 ## 🛠️ Development
 
-### Setup Development Environment
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing guidelines, and contribution process.
 
-```bash
-# Clone repository
-git clone https://github.com/sturrent/aks-net-diagnostics.git
-cd aks-net-diagnostics
-
-# Install dependencies (if requirements.txt exists)
-pip install -r requirements.txt
-
-# Run tests
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ --cov=aks_diagnostics --cov-report=html
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-pytest -v
-
-# Run specific test file
-pytest tests/test_nsg_analyzer.py -v
-
-# Run specific test
-pytest tests/test_nsg_analyzer.py::TestNSGAnalyzer::test_inter_node_blocking -v
-
-# Stop on first failure
-pytest -x
-```
-
-**Test Coverage**: 147 tests covering all modules
-
-### Project Structure
-
-```
-aks-net-diagnostics/
-├── aks-net-diagnostics.py          # Main orchestrator (451 lines)
-├── aks_diagnostics/                # Module package
-│   ├── __init__.py
-│   ├── api_server_analyzer.py      # API server access validation
-│   ├── azure_cli.py                # Azure CLI execution & caching
-│   ├── base_analyzer.py            # Base class for analyzers
-│   ├── cache.py                    # Response caching
-│   ├── cluster_data_collector.py   # Data fetching
-│   ├── connectivity_tester.py      # Active connectivity tests
-│   ├── dns_analyzer.py             # DNS validation
-│   ├── exceptions.py               # Custom exceptions
-│   ├── misconfiguration_analyzer.py # Issue correlation
-│   ├── models.py                   # Data models
-│   ├── nsg_analyzer.py             # NSG validation
-│   ├── outbound_analyzer.py        # Outbound configuration
-│   ├── report_generator.py         # Report formatting
-│   ├── route_table_analyzer.py     # UDR analysis
-│   └── validators.py               # Input validation
-├── tests/                          # Test suite (147 tests)
-│   ├── test_api_server_analyzer.py
-│   ├── test_cache.py
-│   ├── test_cluster_data_collector.py
-│   ├── test_connectivity_tester.py
-│   ├── test_dns_analyzer.py
-│   ├── test_models.py
-│   ├── test_nsg_analyzer.py
-│   ├── test_route_table_analyzer.py
-│   └── test_validators.py
-├── README.md                       # This file
-└── LICENSE                         # MIT License
-```
-
-### Adding a New Analyzer
-
-1. Create module in `aks_diagnostics/` (e.g., `my_analyzer.py`)
-2. Inherit from `BaseAnalyzer` if applicable
-3. Implement `analyze()` method
-4. Add findings using `self.add_finding()`
-5. Create tests in `tests/test_my_analyzer.py`
-6. Import and use in main script
-
-Example:
-
-```python
-from aks_diagnostics.base_analyzer import BaseAnalyzer
-from aks_diagnostics.models import Finding, FindingCode, Severity
-
-class MyAnalyzer(BaseAnalyzer):
-    def __init__(self, azure_cli, cluster_info):
-        super().__init__(azure_cli, cluster_info)
-    
-    def analyze(self):
-        # Perform analysis
-        result = self.azure_cli.execute(['some', 'command'])
-        
-        # Add findings
-        if some_condition:
-            self.add_finding(Finding.create_warning(
-                FindingCode.MY_ISSUE,
-                message="Issue detected",
-                recommendation="Fix it this way"
-            ))
-        
-        return {"status": "analyzed"}
-```
-
-### Code Quality Standards
-
-- **Type Hints**: All functions use type annotations
-- **Docstrings**: All public methods documented
-- **Error Handling**: Comprehensive exception handling
-- **Logging**: Consistent logging patterns
-- **Testing**: Minimum 80% code coverage target
+For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## ❓ Troubleshooting
 
