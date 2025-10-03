@@ -2054,7 +2054,7 @@ EXAMPLES:
             if critical_count > 0:
                 print(f"- [!] {critical_count} Critical issue(s)")
             if error_count > 0:
-                print(f"- X {error_count} Error issue(s)")
+                print(f"- [X] {error_count} Error issue(s)")
             if warning_count > 0:
                 print(f"- [!] {warning_count} Warning issue(s)")
             if info_count > 0:
