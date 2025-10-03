@@ -36,10 +36,17 @@ class InputValidator:
         if cmd[0] not in ALLOWED_AZ_COMMANDS:
             raise ValidationError(f"Command '{cmd[0]}' is not allowed")
         
+        # Check if this is a VMSS run-command (scripts are executed remotely, not locally)
+        is_vmss_script = ('vmss' in cmd and 'run-command' in cmd and '--scripts' in cmd)
+        
         # Validate that arguments don't contain shell metacharacters
         dangerous_chars = ['|', '&', ';', '(', ')', '$', '`', '\\', '"', "'", '<', '>']
-        for arg in cmd:
+        for i, arg in enumerate(cmd):
             if any(char in str(arg) for char in dangerous_chars):
+                # For VMSS run-command, the --scripts argument is executed remotely on the VM
+                # so it's safe to allow quotes and other characters
+                if is_vmss_script and i > 0 and cmd[i-1] == '--scripts':
+                    continue  # Skip validation for remote scripts
                 # Allow some safe characters in specific contexts
                 if not InputValidator._is_safe_argument(str(arg)):
                     raise ValidationError(

@@ -66,6 +66,8 @@ venv.bak/
 aks-net-diagnostics_*.json
 .aks_cache/
 *.log
+*.pyz
+build_temp/
 
 # Jupyter Notebook
 .ipynb_checkpoints

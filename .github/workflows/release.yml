@@ -1,0 +1,59 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0, v2.1.0
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        
+    - name: Build zipapp
+      run: python build_zipapp.py
+      
+    - name: Verify build
+      run: |
+        python aks-net-diagnostics.pyz --help
+        ls -lh aks-net-diagnostics.pyz
+        
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: aks-net-diagnostics.pyz
+        body: |
+          ## AKS Network Diagnostics - Single File Distribution
+          
+          **Download:** `aks-net-diagnostics.pyz` (Python zipapp - ~57 KB)
+          
+          ### Usage
+          ```bash
+          # Download and run
+          python aks-net-diagnostics.pyz -n myCluster -g myResourceGroup
+          
+          # Or make executable (Linux/macOS)
+          chmod +x aks-net-diagnostics.pyz
+          ./aks-net-diagnostics.pyz -n myCluster -g myResourceGroup
+          ```
+          
+          ### Requirements
+          - Python 3.7+
+          - Azure CLI installed and authenticated (`az login`)
+          
+          ### What's New
+          See [CHANGELOG.md](CHANGELOG.md) for details.
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

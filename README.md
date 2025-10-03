@@ -1,335 +1,492 @@
-# AKS Network Diagnostics Tool
+﻿# AKS Network Diagnostics Tool
 
-A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) cluster network configurations. Performs deep analysis to diagnose networking issues, validate security configurations, and detect misconfigurations including User Defined Routes (UDRs), DNS, NAT Gateway setups, NSGs, and API server access restrictions.
+A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network configurations and diagnosing connectivity issues. Features a modular architecture with specialized analyzers for deep network troubleshooting.
 
-## 🆕 What's New
+[![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+[![Azure CLI 2.0+](https://img.shields.io/badge/Azure%20CLI-2.0+-blue.svg)](https://docs.microsoft.com/en-us/cli/azure/)
+[![Tests](https://img.shields.io/badge/tests-147%20passing-success.svg)](tests/)
 
-- **✅ Windows Support**: Full compatibility with Windows PowerShell and Command Prompt
-- **✅ Modular Architecture**: New `aks_diagnostics` package with reusable components
-- **✅ Test Suite**: 26 unit tests ensuring code quality and reliability
-- **✅ Production-Ready Caching**: TTL-based cache with persistence for faster repeated runs
-- **✅ Modern Python**: Updated to use timezone-aware datetime (Python 3.7+ compatible)
+## 🎯 Key Features
+
+- **🔍 Comprehensive Analysis**: 9 specialized analyzers for deep network diagnostics
+- **🚀 Active Testing**: Optional connectivity probes from cluster nodes
+- **📊 Multiple Output Formats**: Console summary + detailed verbose + JSON export
+- **🛡️ Security Focused**: NSG compliance, inter-node traffic validation
+- **🔧 Production Ready**: 147 unit tests, modular architecture
+- **📝 Detailed Reports**: Actionable recommendations for every finding
+
+## 📚 Table of Contents
+
+- [Quick Start](#quick-start)
+- [Prerequisites](#prerequisites)
+- [What It Analyzes](#what-it-analyzes)
+- [Architecture](#architecture)
+- [Command Options](#command-options)
+- [Usage Examples](#usage-examples)
+- [Active Connectivity Tests](#active-connectivity-tests)
+- [Output Files](#output-files)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
 
 ## 🚀 Quick Start
 
-### Windows (PowerShell/CMD)
-
-```powershell
-# Basic analysis with summary output
+```bash
+# Basic analysis (console output only)
 python aks-net-diagnostics.py -n my-cluster -g my-resource-group
 
-# Detailed analysis with verbose output
+# Detailed output
 python aks-net-diagnostics.py -n my-cluster -g my-resource-group --verbose
 
-# Include active connectivity testing from cluster nodes
+# Save JSON report (auto-generated filename)
+python aks-net-diagnostics.py -n my-cluster -g my-resource-group --json-report
+
+# Save JSON report with custom filename
+python aks-net-diagnostics.py -n my-cluster -g my-resource-group --json-report my-report.json
+
+# Include connectivity testing from cluster nodes
 python aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
 ```
 
-### Linux/macOS
+## Prerequisites
+
+- **Python 3.7+** - [Download](https://www.python.org/downloads/)
+- **Azure CLI 2.0+** - [Installation guide](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
+- **Azure Authentication**: Run `az login` before using the tool
+- **Permissions**: Reader access to AKS cluster and related network resources
+
+## � Installation & Usage
+
+### Option 1: Single-File Distribution (Recommended for Quick Use)
+
+Download and run the pre-built `.pyz` file from [Releases](https://github.com/sturrent/aks-net-diagnostics/releases):
 
 ```bash
-# Basic analysis with summary output
-python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group
+# Download the latest release
+wget https://github.com/sturrent/aks-net-diagnostics/releases/latest/download/aks-net-diagnostics.pyz
 
-# Detailed analysis with verbose output
-python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --verbose
+# Run directly with Python
+python aks-net-diagnostics.pyz -n myCluster -g myResourceGroup
 
-# Include active connectivity testing from cluster nodes
-python3 aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
+# Or make it executable (Linux/macOS)
+chmod +x aks-net-diagnostics.pyz
+./aks-net-diagnostics.pyz -n myCluster -g myResourceGroup
 ```
 
-## ✨ Key Features
+**Advantages:**
+- ✅ Single file (~57 KB)
+- ✅ No installation required
+- ✅ Just download and run
+- ✅ All modules bundled inside
 
-### **🔍 Comprehensive Analysis**
-
-- **Network Configuration**: Outbound types (LoadBalancer/NAT Gateway/UDR), VNet topology, DNS settings
-- **Outbound Connectivity**: Load Balancer IPs, NAT Gateway public IPs and prefixes, UDR conflict detection
-- **UDR Analysis**: User Defined Routes detection, virtual appliance routing, traffic impact assessment  
-- **NSG Analysis**: Network Security Groups on subnets and NICs, rule compliance checking, blocking rule detection
-- **Private Clusters**: DNS zone validation, VNet links, private endpoint verification
-- **API Server Security**: Authorized IP ranges analysis, security validation, outbound IP authorization checks
-- **Security Assessment**: Broad IP range detection, private range validation, connectivity impact analysis
-- **Active Connectivity**: Optional VMSS-based testing with DNS-first logic (DNS resolution, HTTPS connectivity, API server access)
-
-### **📊 Output Modes**
-
-- **Summary Mode** (default): Concise findings with key issues highlighted
-- **Verbose Mode** (`--verbose`): Detailed report with comprehensive analysis and test outputs
-- **JSON Reports**: Structured data automatically saved to timestamped files
-
-### **🛡️ Read Only Operations**
-
-- **Read-Only**: Uses only Azure CLI show/list commands
-- **Optional Probing**: Active connectivity tests require explicit `--probe-test` flag
-
-## 📋 Prerequisites
-
-### Required Tools
+### Option 2: Clone Repository (For Development/Customization)
 
 ```bash
-# Python 3.7 or higher
-python --version     # Windows
-python3 --version    # Linux/macOS
+git clone https://github.com/sturrent/aks-net-diagnostics.git
+cd aks-net-diagnostics
+python aks-net-diagnostics.py -n myCluster -g myResourceGroup
+```
 
-# Azure CLI 2.0 or higher
+### Building Your Own .pyz File
+
+To create the single-file distribution:
+
+```bash
+python build_zipapp.py
+# Creates: aks-net-diagnostics.pyz
+```
+
+## �🔎 What It Analyzes
+
+### Network Components
+- ✅ **VNet Configuration**: Topology, address spaces, peerings
+- ✅ **Outbound Connectivity**: LoadBalancer, NAT Gateway, User Defined Routes
+- ✅ **DNS Configuration**: Azure DNS, Custom DNS, Private DNS zones
+- ✅ **VMSS Network Profiles**: Node subnet assignments, NIC configurations
+
+### Security & Access Control
+- ✅ **NSG Rules**: Required AKS traffic, blocking rules, inter-node communication
+- ✅ **API Server Access**: Authorized IP ranges, private endpoints
+- ✅ **Route Tables**: UDR impact on AKS management traffic
+
+### Active Testing (Optional)
+- ✅ **DNS Resolution**: MCR, API server hostname lookup from nodes
+- ✅ **HTTPS Connectivity**: Container registry, API server reachability
+- ✅ **Network Path**: Validates full network path from nodes to Azure services
+
+## 🏗️ Architecture
+
+The tool uses a **modular architecture** with specialized analyzers:
+
+- **Data Collection**: Gathers cluster info, VNets, VMSS configurations
+- **Network Analysis**: NSG rules, DNS, routing, outbound connectivity
+- **Security Validation**: API server access, authorized IPs
+- **Active Testing**: Optional connectivity probes from nodes
+- **Reporting**: Console output, JSON export, finding correlation
+
+**Key Modules**: NSGAnalyzer, DNSAnalyzer, RouteTableAnalyzer, APIServerAccessAnalyzer, ConnectivityTester, OutboundConnectivityAnalyzer
+
+For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)
+
+## 🚨 Common Issues Detected
+
+| Issue | Severity | Description |
+|-------|----------|-------------|
+| Outbound IPs not in authorized ranges | Critical | Cluster can't reach API server |
+| Default route to firewall/NVA | Critical | Breaks AKS management traffic |
+| NSG blocking required traffic | Critical | Prevents node communication |
+| NSG blocking inter-node traffic | Warning | Breaks system components (konnectivity, metrics-server) |
+| DNS resolution failures | Critical | Nodes can't resolve Azure services |
+| HTTPS connectivity blocked | Critical | SSL interception or firewall blocking |
+| Private DNS zone VNet link missing | Critical | Private cluster name resolution fails |
+| Custom DNS not forwarding to Azure DNS | Critical | Private endpoints unreachable |
+
+## 💻 Command Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `-n <NAME>` | AKS cluster name (required) | `-n my-cluster` |
+| `-g <GROUP>` | Resource group name (required) | `-g my-rg` |
+| `--verbose` | Show detailed analysis and test results | `--verbose` |
+| `--probe-test` | Enable active connectivity tests from nodes | `--probe-test` |
+| `--json-report [FILE]` | Save JSON report (optional filename) | `--json-report report.json` |
+| `--subscription <ID>` | Override Azure subscription | `--subscription abc-123` |
+| `--cache` | Enable response caching (faster reruns) | `--cache` |
+
+## 📖 Usage Examples
+
+### Basic Analysis
+
+Quick health check of cluster network configuration:
+
+```bash
+python aks-net-diagnostics.py -n production-cluster -g prod-rg
+```
+
+### Detailed Verbose Analysis
+
+Get comprehensive details about all network components:
+
+```bash
+python aks-net-diagnostics.py -n production-cluster -g prod-rg --verbose
+```
+
+### Active Connectivity Testing
+
+Test actual connectivity from cluster nodes (DNS + HTTPS):
+
+```bash
+python aks-net-diagnostics.py -n production-cluster -g prod-rg --probe-test
+```
+
+### Save JSON Report
+
+Export full analysis data for documentation or automation:
+
+```bash
+# Auto-generated filename
+python aks-net-diagnostics.py -n production-cluster -g prod-rg --json-report
+
+# Custom filename
+python aks-net-diagnostics.py -n production-cluster -g prod-rg --json-report audit-2025-10-03.json
+```
+
+### Troubleshoot Failed Cluster
+
+Comprehensive analysis with connectivity tests:
+
+```bash
+python aks-net-diagnostics.py -n failed-cluster -g troubleshooting-rg --verbose --probe-test
+```
+
+### Multi-Subscription Analysis
+
+Analyze cluster in different subscription:
+
+```bash
+python aks-net-diagnostics.py -n cluster -g rg --subscription xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+## Sample Output
+
+### Example: Private Cluster with DNS Issues
+
+```bash
+python aks-net-diagnostics.py -g my-resource-group -n my-private-cluster --verbose
+```
+
+**Output:**
+
+```text
+# AKS Network Assessment Report
+
+**Cluster:** my-private-cluster
+**Resource Group:** my-resource-group
+**Generated:** 2025-10-03 14:17:24 UTC
+
+## Cluster Overview
+
+| Property | Value |
+|----------|-------|
+| Provisioning State | Failed |
+| Power State | Running |
+| Network Plugin | azure |
+| Outbound Type | loadBalancer |
+| Private Cluster | true |
+
+## Network Configuration
+
+### API Server Access
+- **Type:** Private cluster
+- **Private FQDN:** my-cluster-xxx.privatelink.eastus.azmk8s.io
+- **Private DNS Zone:** system
+- **Access Restrictions:** None (unrestricted public access)
+
+### Outbound Connectivity
+- **Type:** loadBalancer
+- **Effective Public IPs:** 20.10.5.100
+
+### Network Security Group (NSG) Analysis
+- **NSGs Analyzed:** 2
+- **Issues Found:** 0
+- **Inter-node Communication:** [OK] Ok
+
+**Subnet NSGs:**
+- **aks-subnet** -> NSG: my-subnet-nsg-eastus
+  - Custom Rules: 0, Default Rules: 6
+
+**NIC NSGs:**
+- **my-nodepool-nsg** (used by: aks-nodepool1-vmss)
+  - Custom Rules: 0, Default Rules: 6
+
+## Findings
+
+**Findings Summary:**
+- [!] 4 Critical issue(s)
+
+**Critical Issues:**
+
+### [!] PRIVATE_DNS_MISCONFIGURED
+**Message:** Private cluster is using custom DNS servers (10.1.0.10) that cannot resolve Azure private DNS zones
+**Recommendation:** Configure DNS forwarding to 168.63.129.16 for '*.privatelink.*.azmk8s.io'
+
+### [!] CLUSTER_OPERATION_FAILURE
+**Message:** Cluster failed with error: VMExtensionProvisioningError - agents are unable to resolve Kubernetes API server name
+**Recommendation:** Check Azure Activity Log and custom DNS configuration
+
+### [!] NODE_POOL_FAILURE
+**Message:** Node pools in failed state: nodepool1
+**Recommendation:** Check node pool configuration and Azure Activity Log
+
+### [!] PDNS_DNS_HOST_VNET_LINK_MISSING
+**Message:** DNS server 10.1.0.10 is hosted in VNet hub-vnet but this VNet is not linked to private DNS zone
+**Recommendation:** Link VNet hub-vnet to private DNS zone for proper DNS resolution
+```
+
+This example shows the tool detecting a common private cluster misconfiguration where custom DNS servers aren't properly configured to resolve Azure private DNS zones.
+
+## 🧪 Active Connectivity Tests
+
+When using `--probe-test`, the tool executes connectivity tests directly from cluster nodes using VMSS run-command.
+
+### Test Suite
+
+| Test | Description | Purpose |
+|------|-------------|---------|
+| **MCR DNS Resolution** | Resolves `mcr.microsoft.com` | Validates DNS for container registry |
+| **Internet Connectivity** | HTTPS to MCR | Tests outbound internet access |
+| **API Server DNS** | Resolves cluster API hostname | Validates private DNS configuration |
+| **API Server HTTPS** | HTTPS to API server | Tests API server reachability |
+
+### Test Logic
+
+- Tests use **dependency checking**: HTTPS tests skip if DNS fails
+- **Timeouts configured**: 60s for MCR, 15s for API server
+- **Full error visibility**: Verbose curl output shows exact failure points
+- **VMSS timeout**: 5 minutes to account for queuing and execution
+
+### Sample Output
+
+```text
+### Connectivity Tests
+
+**Test Results:**
+- ✅ MCR DNS Resolution - PASSED
+  - Resolved to: 150.171.70.10, 150.171.69.10
+  
+- ✅ Internet Connectivity - PASSED
+  - Successfully connected to mcr.microsoft.com
+  
+- ✅ API Server DNS Resolution - PASSED
+  - Resolved to: 10.0.0.10
+  
+- ❌ API Server HTTPS Connectivity - FAILED
+  - Error: Connection timeout after 15s
+  - Possible causes: Firewall blocking, NSG rules, routing issues
+```
+
+## 📁 Output Files
+
+### Console Output
+
+- **Summary Mode** (default): High-level findings and recommendations
+- **Verbose Mode** (`--verbose`): Detailed analysis of all components
+- **Exit Codes**:
+  - `0`: Analysis completed successfully
+  - `1`: Unexpected error
+  - `2`: Configuration/validation error
+  - `3`: File error
+  - `4`: Permission error
+  - `130`: Cancelled by user (Ctrl+C)
+
+### JSON Report
+
+Generated with `--json-report`, contains:
+
+```json
+{
+  "metadata": {
+    "cluster_name": "my-cluster",
+    "resource_group": "my-rg",
+    "subscription": "xxx",
+    "generated": "2025-10-03T14:30:00Z",
+    "script_version": "2.1"
+  },
+  "cluster_info": { "..." },
+  "findings": [
+    {
+      "severity": "critical",
+      "code": "CLUSTER_OPERATION_FAILURE",
+      "message": "...",
+      "recommendation": "..."
+    }
+  ],
+  "network_analysis": {
+    "vnets": [],
+    "outbound": {},
+    "nsgs": {},
+    "dns": {},
+    "api_server": {}
+  },
+  "connectivity_tests": []
+}
+```
+
+## 🛠️ Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing guidelines, and contribution process.
+
+For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## ❓ Troubleshooting
+
+### Common Issues
+
+**Azure CLI not found**
+
+```bash
+# Verify Azure CLI installation
 az --version
+
+# Install if missing
+# Windows: https://aka.ms/installazurecliwindows
+# Linux: curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+# macOS: brew install azure-cli
 ```
 
-### Azure Authentication
+**Not logged in to Azure**
 
 ```bash
 # Login to Azure
 az login
 
-# Set subscription (optional, if you have multiple subscriptions)
-az account set --subscription "your-subscription-id"
+# Verify authentication
+az account show
+
+# Set specific subscription
+az account set --subscription "My Subscription"
 ```
 
-### Optional: Install Development Dependencies
+**Python not found**
 
 ```bash
-# For running tests and development
-pip install -r requirements.txt
+# Check Python version
+python --version  # or python3 --version
+
+# Requires Python 3.7+
+# Download from: https://www.python.org/downloads/
 ```
 
-## 🎯 Usage Examples
-
-### Basic Commands
-
-```bash
-# Standard analysis (summary + JSON report)
-python3 aks-net-diagnostics.py -n prod-cluster -g prod-rg
-
-# Detailed analysis for troubleshooting
-python3 aks-net-diagnostics.py -n failed-cluster -g rg --verbose
-
-# Active connectivity testing (executes nslookup and curl commands in cluster nodes)
-python3 aks-net-diagnostics.py -n cluster -g rg --probe-test
-```
-
-## 📊 Sample Output
-
-### Summary Mode (Default)
-
-```text
-# AKS Network Assessment Summary
-
-**Cluster:** my-cluster (Succeeded)
-**Resource Group:** my-rg
-**Generated:** 2025-09-02 23:30:45 UTC
-
-**Configuration:**
-- Network Plugin: azure
-- Outbound Type: managedNATGateway
-- Private Cluster: false
-
-**Outbound Configuration:**
-- NAT Gateway IPs:
-  - 4.205.231.XX
-
-**API Server Security:**
-- Authorized IP Ranges: 1 range(s)
-  - 100.65.190.XX/32
-
-**Findings Summary:**
-- ❌ Cluster outbound IPs (4.205.231.XX) are not in authorized IP ranges
-- ⚠️ Very restrictive authorized IP range detected
-
-💡 Tip: Use --verbose flag for detailed analysis
-📄 JSON report saved to: aks-net-diagnostics_my-cluster_20250902_233045.json
-```
-
-## 🔍 What It Detects
-
-### **Common Issues**
-
-| Code | Issue | Severity |
-|------|-------|----------|
-| `API_OUTBOUND_NOT_AUTHORIZED` | Cluster outbound IPs not in authorized IP ranges (nodes cannot access API) | ❌ Critical |
-| `UDR_HIGH_IMPACT_ROUTE` | Default route (0.0.0.0/0) redirects traffic to virtual appliance | ❌ Critical |
-| `CLUSTER_OPERATION_FAILURE` | Cluster failed with operation errors | ❌ Critical |
-| `NODE_POOL_FAILURE` | Node pools in failed state | ❌ Critical |
-| `UDR_DEFAULT_ROUTE_VA` | Virtual appliance routing may affect AKS connectivity | ⚠️ Warning |
-| `UDR_AZURE_SERVICES_VA` | Azure service traffic routed through virtual appliance | ⚠️ Warning |
-| `UDR_CONTAINER_REGISTRY_VA` | Container registry traffic routed through virtual appliance | ⚠️ Warning |
-| `NSG_BLOCKING_RULE_DETECTED` | NSG rule blocking required AKS traffic | ❌ Critical |
-| `CONNECTIVITY_DNS_FAILURE` | DNS resolution tests failed | ❌ Critical |
-| `CONNECTIVITY_HTTPS_FAILURE` | HTTPS connectivity tests failed (firewall/NSG blocking) | ❌ Critical |
-| `CONNECTIVITY_API_SERVER_FAILURE` | API server connectivity test failed | ❌ Critical |
-| `PDNS_DNS_HOST_VNET_LINK_MISSING` | DNS server in peered VNet not linked to private DNS zone | ❌ Critical |
-
-### **Analysis Coverage**
-
-- ✅ **Cluster State**: Provisioning status, power state, network plugin configuration
-- ✅ **Network Topology**: VNets, subnets, peerings, DNS configuration
-- ✅ **Outbound Connectivity**: Load balancers, NAT gateways, public IP prefixes, effective public IPs
-- ✅ **UDR Analysis**: Route tables, virtual appliance detection, traffic impact assessment, conflict detection
-- ✅ **NSG Analysis**: Network Security Groups on subnets and NICs, rule compliance, blocking rule detection
-- ✅ **API Server Security**: Authorized IP ranges, security validation, outbound IP authorization
-- ✅ **Private DNS**: Zone validation, VNet links, A record verification
-- ✅ **Active Testing**: DNS-first connectivity testing (DNS resolution → HTTPS connectivity, API server access)
-
-## 📋 Command Line Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-n <NAME>` | AKS cluster name | Required |
-| `-g <GROUP>` | Resource group name | Required |
-| `--verbose` | Show detailed analysis output and test results | Summary mode |
-| `--probe-test` | Enable active connectivity tests from cluster nodes | Disabled |
-| `--subscription <ID>` | Azure subscription override | Current context |
-
-## 🏗️ Real-World Scenarios
-
-### **Scenario 1: Healthy Public Cluster**
-
-```bash
-# Standard public cluster with all services working
-python3 aks-net-diagnostics.py -n aks-good-cluster -g aks-good-cluster --probe-test
-```
-
-**Expected Results:**
-
-- ✅ DNS Resolution tests: All pass (MCR, Azure Management, API Server)
-- ✅ HTTPS Connectivity tests: All pass (proper SSL handshake completion)
-- ✅ Load Balancer outbound IP: 130.107.224.XX
-- ✅ No API server restrictions (unrestricted public access)
-- ✅ No blocking NSG rules detected
-
-### **Scenario 2: Private Cluster with DNS Issues**
-
-```bash
-# Private cluster with missing DNS zone links
-python3 aks-net-diagnostics.py -n aks-api-connection -g aks-api-connection-lab1-rg --probe-test
-```
-
-**Detects:**
-
-- ✅ DNS Resolution: MCR and Azure Management pass
-- ❌ **Critical**: API Server DNS resolves to public IP instead of private IP
-- 🚫 **Skipped**: API Server HTTPS test (DNS-first logic skips due to DNS failure)
-- ❌ **Critical**: DNS server in peered VNet not linked to private DNS zone
-- ❌ **Critical**: Private cluster connectivity failure
-
-### **Scenario 3: Azure Firewall/NVA with SSL Inspection**
-
-```bash
-# Cluster with Azure Firewall intercepting SSL traffic
-python3 aks-net-diagnostics.py -n aks-slb-fw -g aks-slb-fw-rg --probe-test --verbose
-```
-
-**Detects:**
-
-- ⚠️ Load Balancer configured (130.107.205.XX) but not effective
-- ✅ Effective outbound via Virtual Appliance: 10.0.1.4
-- ✅ DNS Resolution tests: All pass (firewall allows DNS)
-- ❌ **Critical**: HTTPS connectivity tests fail (SSL handshake interrupted)
-- ❌ Error: `ssl routines::unexpected eof while reading` (firewall blocking SSL)
-- ⚠️ Default route (0.0.0.0/0) affects all traffic including container registry
-
-### **Scenario 4: NSG Analysis with Blocking Rules**
-
-```bash
-# Cluster with NSGs potentially blocking traffic
-python3 aks-net-diagnostics.py -n cluster-with-nsgs -g rg --verbose
-```
-
-**Detects:**
-
-- ✅ NSG analysis on subnets and NICs
-- ❌ **Critical**: NSG rules blocking required AKS traffic (if present)
-- ✅ Inter-node communication validation
-- ✅ Deduplication of NSG findings across multiple NICs with same NSG
-
-## 🧪 Testing
-
-The tool includes a comprehensive test suite to ensure reliability:
-
-```bash
-# Run all tests
-python -m unittest discover -s tests -v
-
-# Run specific test module
-python -m unittest tests.test_validators -v
-python -m unittest tests.test_cache -v
-python -m unittest tests.test_models -v
-```
-
-**Test Coverage:**
-
-- 26 unit tests across 3 test modules
-- Input validation tests (14 test cases)
-- Cache functionality tests (8 test cases)
-- Data model tests (7 test cases)
-
-## 🏗️ Modular Architecture
-
-The tool now includes a modular `aks_diagnostics` package for developers:
-
-```python
-from aks_diagnostics.validators import InputValidator
-from aks_diagnostics.cache import CacheManager
-from aks_diagnostics.azure_cli import AzureCLIExecutor
-from aks_diagnostics.exceptions import AzureCLIError, ValidationError
-
-# Validate input
-try:
-    cluster = InputValidator.validate_resource_name('my-cluster', 'cluster')
-except ValidationError as e:
-    print(f"Invalid: {e}")
-
-# Use cache for better performance
-cache = CacheManager(enabled=True, default_ttl=3600)
-
-# Execute Azure CLI with caching
-azure_cli = AzureCLIExecutor(cache_manager=cache)
-result = azure_cli.execute(['aks', 'show', '-n', cluster, '-g', 'rg'])
-```
-
-**Package Structure:**
-
-```text
-aks_diagnostics/
-├── models.py         # Data models (VMSSInstance, Finding, DiagnosticResult)
-├── exceptions.py     # Custom exception hierarchy (7 types)
-├── validators.py     # Input validation and sanitization
-├── cache.py          # TTL-based cache with file persistence
-├── azure_cli.py      # Azure CLI executor with error handling
-└── base_analyzer.py  # Base class for custom analyzers
-```
-
-## 🔧 Troubleshooting
-
-### Windows Issues
-
-**Azure CLI not found:**
-
-```powershell
-# Verify Azure CLI is installed and in PATH
-az --version
-
-# If not found, add to PATH or use full path
-"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" --version
-```
-
-**Python not found:**
-
-```powershell
-# Verify Python is installed
-python --version
-
-# If using python3 command
-python3 --version
-```
-
-### Linux/macOS Issues
-
-**Permission denied:**
+**Permission errors on Linux/macOS**
 
 ```bash
 # Make script executable
 chmod +x aks-net-diagnostics.py
 
-# Or run with python directly
-python3 aks-net-diagnostics.py -n cluster -g rg
+# Run with python explicitly
+python3 aks-net-diagnostics.py -n my-cluster -g my-rg
 ```
+
+**VMSS run-command timeout**
+
+If connectivity tests timeout:
+- Cluster nodes may be under heavy load
+- Network path may be experiencing latency
+- Use `--verbose` to see detailed error messages
+- Re-run without `--probe-test` for static analysis only
+
+**Module import errors**
+
+```bash
+# Ensure you're in the project directory
+cd aks-net-diagnostics
+
+# Install any missing dependencies
+pip install -r requirements.txt  # if requirements.txt exists
+```
+
+### Getting Help
+
+- **Issues**: [GitHub Issues](https://github.com/sturrent/aks-net-diagnostics/issues)
+- **Verbose Mode**: Always use `--verbose` when reporting issues
+- **JSON Export**: Attach JSON report (`--json-report`) for detailed diagnostics
+
+## 🤝 Contributing
+
+Contributions are welcome! Areas for improvement:
+
+- Additional analyzers (e.g., Azure Firewall, Application Gateway)
+- Performance optimizations (parallel Azure CLI calls)
+- Additional active tests (custom endpoints, specific ports)
+- Enhanced error messages and recommendations
+- Documentation improvements
+
+### Contribution Process
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Make changes with tests
+4. Run test suite (`pytest -v`)
+5. Commit changes (`git commit -am 'Add my feature'`)
+6. Push to branch (`git push origin feature/my-feature`)
+7. Open Pull Request
+
+### Testing Requirements
+
+- All new code must include unit tests
+- Maintain or improve code coverage (currently 147 tests)
+- Tests must pass: `pytest -x`
+- Follow existing code style and patterns
+
+## 📄 License
+
+MIT License - See [LICENSE](LICENSE) file for details
+
+## 🙏 Acknowledgments
+
+Built for Azure Kubernetes Service troubleshooting by the Azure community.
+
+---
+
+**Version**: 2.1  
+**Last Updated**: October 2025  
+**Maintained by**: [@sturrent](https://github.com/sturrent)
