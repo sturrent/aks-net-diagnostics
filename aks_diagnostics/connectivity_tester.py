@@ -194,42 +194,58 @@ class ConnectivityTester:
         api_server_profile = self.cluster_info.get('apiServerAccessProfile') or {}
         is_private = api_server_profile.get('enablePrivateCluster', False)
         
-        # Define connectivity tests
+        # Define connectivity tests in order:
+        # 1. MCR DNS first (internet connectivity prerequisite)
+        # 2. MCR HTTPS (if MCR DNS succeeds)
+        # 3. API Server DNS (cluster-specific prerequisite)
+        # 4. API Server HTTPS (if API Server DNS succeeds)
         tests = [
+            {
+                "name": "MCR DNS Resolution",
+                "description": "Resolve MCR (Microsoft Container Registry) FQDN to IP address",
+                "command": "nslookup mcr.microsoft.com",
+                "expected_keywords": ["mcr.microsoft.com"],
+                "check_private_ip": False,
+                "critical": False,
+                "skip_group": None  # No dependencies
+            },
+            {
+                "name": "Internet Connectivity",
+                "description": "Test outbound internet connectivity to MCR (Microsoft Container Registry)",
+                "command": "curl -v --insecure --proxy-insecure https://mcr.microsoft.com/v2/",
+                "expected_keywords": ["200", "401", "unauthorized"],
+                "critical": False,
+                "skip_group": "MCR DNS Resolution"  # Depends on MCR DNS
+            },
             {
                 "name": "API Server DNS Resolution",
                 "description": "Resolve API server FQDN to IP address",
                 "command": f"nslookup {api_server_fqdn}",
                 "expected_keywords": [api_server_fqdn],
                 "check_private_ip": is_private,
-                "critical": True
+                "critical": True,
+                "skip_group": None  # No dependencies
             },
             {
                 "name": "API Server HTTPS Connectivity",
                 "description": "Test HTTPS connection to API server",
                 "command": f"curl -k -s -o /dev/null -w '%{{http_code}}' --connect-timeout 10 https://{api_server_fqdn}:443",
                 "expected_keywords": ["200", "401", "403"],  # Any HTTP response indicates connectivity
-                "critical": True
+                "critical": True,
+                "skip_group": "API Server DNS Resolution"  # Depends on API Server DNS
             }
         ]
         
-        # Add Internet connectivity test (using same test as AKS node provisioning)
-        tests.append({
-            "name": "Internet Connectivity",
-            "description": "Test outbound internet connectivity to MCR (Microsoft Container Registry)",
-            "command": "curl -v --insecure --proxy-insecure https://mcr.microsoft.com/v2/",
-            "expected_keywords": ["200", "401", "unauthorized"],
-            "critical": False
-        })
+        # Execute each test with dependency tracking
+        failed_tests = set()  # Track which tests have failed to determine skip logic
         
-        # Execute each test
-        dns_failed = False
         for test in tests:
             test_name = test['name']
+            skip_group = test.get('skip_group')
             
-            # If DNS test failed, skip subsequent tests that require DNS
-            if dns_failed and "DNS" not in test_name:
-                self.logger.info(f"  Test: {test_name} - SKIPPED (DNS resolution failed)")
+            # Check if this test should be skipped due to dependency failure
+            if skip_group and skip_group in failed_tests:
+                self.logger.info(f"  Test: {test_name} - SKIPPED ({skip_group} failed)")
                 result = {
                     "test_name": test_name,
                     "description": test['description'],
@@ -241,7 +257,7 @@ class ConnectivityTester:
                     "stdout": "",
                     "stderr": "",
                     "exit_code": None,
-                    "analysis": "Skipped because DNS resolution failed",
+                    "analysis": f"Skipped because {skip_group} failed",
                     "critical": test.get('critical', False)
                 }
                 self.probe_results["tests"].append(result)
@@ -253,10 +269,11 @@ class ConnectivityTester:
             result = self._execute_vmss_test(vmss_instance, test)
             self.probe_results["tests"].append(result)
             
-            # Check if DNS test failed
-            if "DNS" in test_name and result['status'] == "failed":
-                dns_failed = True
-                self.logger.warning("    DNS resolution failed - subsequent connectivity tests will be skipped")
+            # Track failed tests to determine skip logic for dependent tests
+            if result['status'] == "failed":
+                failed_tests.add(test_name)
+                if "DNS" in test_name:
+                    self.logger.warning(f"    {test_name} failed - dependent connectivity tests will be skipped")
             
             # Log test results based on verbosity
             # In verbose mode, show full JSON with compacted output
