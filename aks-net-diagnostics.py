@@ -409,7 +409,7 @@ EXAMPLES:
                 subnet_ids.add(subnet_id)
         
         if not subnet_ids:
-            self.logger.warning("No VNet-integrated node pools found. Using default Azure networking.")
+            self.logger.info("Agent pools use AKS-managed VNet (vnetSubnetId not set). VNet details will be retrieved from VMSS configuration.")
             return
         
         # Analyze each VNet
