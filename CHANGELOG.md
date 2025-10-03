@@ -5,6 +5,25 @@ All notable changes to the AKS Network Diagnostics tool will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2025-10-03
+
+### Changed
+
+#### Documentation Improvements
+- **Fixed emoji encoding issues**: Removed all emoji symbols to prevent rendering issues across platforms
+- **Improved README structure**: Reordered sections for better user flow (Prerequisites → Installation → Quick Start)
+- **Featured .pyz distribution**: Highlighted single-file distribution as the recommended method for end users
+- **Removed redundant content**: Eliminated duplicate Contributing section from README (consolidated in CONTRIBUTING.md)
+- **Cleaned up all markdown files**: Removed emojis from README.md, ARCHITECTURE.md, and CONTRIBUTING.md for professional, consistent presentation
+
+#### GitHub Actions
+- **Added automated release workflow**: Automatically builds and publishes .pyz file when version tags are pushed
+- **Single-file distribution**: GitHub Releases now include the pre-built aks-net-diagnostics.pyz file (~57 KB)
+
+### Fixed
+- **Documentation rendering**: Fixed "�" symbols that appeared instead of emojis in some markdown viewers
+- **User experience**: Quick Start section now properly appears after Prerequisites section
+
 ## [1.0.0] - 2025-10-03
 
 ### 🎉 Initial Release
