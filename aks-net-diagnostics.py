@@ -29,6 +29,8 @@ from aks_diagnostics.outbound_analyzer import OutboundConnectivityAnalyzer
 from aks_diagnostics.report_generator import ReportGenerator
 from aks_diagnostics.azure_cli import AzureCLIExecutor
 from aks_diagnostics.cache import CacheManager
+from aks_diagnostics.validators import InputValidator
+from aks_diagnostics.exceptions import ValidationError
 
 # Configuration constants
 SCRIPT_VERSION = "2.1"
@@ -159,12 +161,12 @@ EXAMPLES:
         args = parser.parse_args()
         
         # Validate required arguments
-        self.aks_name = self._validate_resource_name(args.name, "cluster name")
-        self.aks_rg = self._validate_resource_name(args.resource_group, "resource group")
+        self.aks_name = InputValidator.validate_resource_name(args.name, "cluster name")
+        self.aks_rg = InputValidator.validate_resource_name(args.resource_group, "resource group")
         
         # Validate optional arguments
         if args.subscription:
-            self.subscription = self._validate_subscription_id(args.subscription)
+            self.subscription = InputValidator.validate_subscription_id(args.subscription)
         else:
             self.subscription = None
             
@@ -186,119 +188,16 @@ EXAMPLES:
             if self.json_report == 'auto':
                 # Auto-generate filename when --json-report used without argument
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                safe_cluster_name = self._sanitize_filename(self.aks_name)
+                safe_cluster_name = InputValidator.sanitize_filename(self.aks_name)
                 self.json_report = f"aks-net-diagnostics_{safe_cluster_name}_{timestamp}.json"
             else:
                 # Validate user-provided filename
-                self.json_report = self._validate_output_path(self.json_report)
-    
-    def _validate_azure_cli_command(self, cmd: List[str]) -> None:
-        """Validate Azure CLI command to prevent injection attacks"""
-        if not cmd or not isinstance(cmd, list):
-            raise ValueError("Command must be a non-empty list")
-        
-        # Check if the first argument is an allowed command
-        if cmd[0] not in ALLOWED_AZ_COMMANDS:
-            raise ValueError(f"Command '{cmd[0]}' is not allowed")
-        
-        # Check if this is a VMSS run-command (scripts are executed remotely, not locally)
-        is_vmss_script = ('vmss' in cmd and 'run-command' in cmd and '--scripts' in cmd)
-        
-        # Validate that arguments don't contain shell metacharacters
-        dangerous_chars = ['|', '&', ';', '(', ')', '$', '`', '\\', '"', "'", '<', '>']
-        for i, arg in enumerate(cmd):
-            if any(char in str(arg) for char in dangerous_chars):
-                # For VMSS run-command, the --scripts argument is executed remotely on the VM
-                # so it's safe to allow quotes and other characters
-                if is_vmss_script and i > 0 and cmd[i-1] == '--scripts':
-                    continue  # Skip validation for remote scripts
-                # Allow some safe characters in specific contexts
-                if not self._is_safe_argument(str(arg)):
-                    raise ValueError(f"Command argument contains potentially dangerous characters: {arg}")
-    
-    def _is_safe_argument(self, arg: str) -> bool:
-        """Check if an argument with special characters is safe"""
-        # Allow Azure resource IDs which contain forward slashes
-        if arg.startswith('/subscriptions/'):
-            return True
-        # Allow JSON queries which might contain quotes
-        if arg.startswith('[') and arg.endswith(']'):
-            return True
-        # Allow other safe patterns as needed
-        return False
-    
-    def _sanitize_filename(self, filename: str) -> str:
-        """Sanitize filename to prevent path traversal and invalid characters"""
-        # Remove path separators and other dangerous characters
-        dangerous_chars = ['/', '\\', '..', '<', '>', ':', '"', '|', '?', '*']
-        sanitized = filename
-        for char in dangerous_chars:
-            sanitized = sanitized.replace(char, '_')
-        
-        # Limit length and ensure it's not empty
-        sanitized = sanitized[:MAX_FILENAME_LENGTH].strip()
-        if not sanitized:
-            sanitized = "unknown"
-        
-        return sanitized
-    
-    def _validate_output_path(self, filepath: str) -> str:
-        """Validate and sanitize output file path"""
-        # Resolve the path to prevent traversal attacks
-        resolved_path = Path(filepath).expanduser().resolve()
-        current_dir = Path.cwd().resolve()
-
-        try:
-            resolved_path.relative_to(current_dir)
-        except ValueError:
-            raise ValueError("Output file path must be within the current directory")
-        
-        # Ensure the filename has a safe extension
-        if not str(resolved_path).lower().endswith('.json'):
-            resolved_path = resolved_path.with_suffix('.json')
-        
-        return str(resolved_path)
-    
-    def _validate_resource_name(self, name: str, resource_type: str) -> str:
-        """Validate Azure resource name"""
-        if not name or not isinstance(name, str):
-            raise ValueError(f"{resource_type.capitalize()} cannot be empty")
-        
-        # Remove leading/trailing whitespace
-        name = name.strip()
-        
-        # Basic length validation
-        if len(name) < 1 or len(name) > MAX_RESOURCE_NAME_LENGTH:
-            raise ValueError(f"{resource_type.capitalize()} must be between 1 and 260 characters")
-        
-        # Check for obviously malicious patterns
-        dangerous_patterns = ['../', '\\', '<script>', 'javascript:', 'data:']
-        for pattern in dangerous_patterns:
-            if pattern.lower() in name.lower():
-                raise ValueError(f"{resource_type.capitalize()} contains invalid characters")
-        
-        return name
-    
-    def _validate_subscription_id(self, subscription_id: str) -> str:
-        """Validate Azure subscription ID format"""
-        if not subscription_id:
-            raise ValueError("Subscription ID cannot be empty")
-        
-        # Basic GUID format validation (loose)
-        import re
-        guid_pattern = r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-        
-        if not re.match(guid_pattern, subscription_id):
-            # Allow subscription names as well, not just GUIDs
-            if len(subscription_id) < 1 or len(subscription_id) > 100:
-                raise ValueError("Invalid subscription ID format")
-        
-        return subscription_id
+                self.json_report = InputValidator.validate_output_path(self.json_report)
     
     def run_azure_cli(self, cmd: List[str], expect_json: bool = True) -> Any:
         """Run Azure CLI command and return result"""
         # Validate command arguments to prevent injection
-        self._validate_azure_cli_command(cmd)
+        InputValidator.validate_azure_cli_command(cmd)
         
         cmd_str = ' '.join(cmd)
         
@@ -1327,7 +1226,7 @@ def main():
     except KeyboardInterrupt:
         print("\n\nOperation cancelled by user.")
         exit_code = 130  # Standard exit code for SIGINT
-    except ValueError as e:
+    except (ValueError, ValidationError) as e:
         print(f"\nConfiguration Error: {e}")
         exit_code = 2
     except FileNotFoundError as e:
