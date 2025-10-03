@@ -457,38 +457,11 @@ pip install -r requirements.txt  # if requirements.txt exists
 - **Verbose Mode**: Always use `--verbose` when reporting issues
 - **JSON Export**: Attach JSON report (`--json-report`) for detailed diagnostics
 
-## 🤝 Contributing
-
-Contributions are welcome! Areas for improvement:
-
-- Additional analyzers (e.g., Azure Firewall, Application Gateway)
-- Performance optimizations (parallel Azure CLI calls)
-- Additional active tests (custom endpoints, specific ports)
-- Enhanced error messages and recommendations
-- Documentation improvements
-
-### Contribution Process
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Make changes with tests
-4. Run test suite (`pytest -v`)
-5. Commit changes (`git commit -am 'Add my feature'`)
-6. Push to branch (`git push origin feature/my-feature`)
-7. Open Pull Request
-
-### Testing Requirements
-
-- All new code must include unit tests
-- Maintain or improve code coverage (currently 147 tests)
-- Tests must pass: `pytest -x`
-- Follow existing code style and patterns
-
-## 📄 License
+## License
 
 MIT License - See [LICENSE](LICENSE) file for details
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 Built for Azure Kubernetes Service troubleshooting by the Azure community.
 
