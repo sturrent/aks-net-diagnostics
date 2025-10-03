@@ -29,18 +29,18 @@ class VMSSInstance:
 class ConnectivityTester:
     """Manages connectivity testing from AKS VMSS instances"""
     
-    def __init__(self, cluster_info: Dict[str, Any], run_azure_cli_func, dns_analyzer=None, verbose: bool = False):
+    def __init__(self, cluster_info: Dict[str, Any], azure_cli_executor, dns_analyzer=None, verbose: bool = False):
         """
         Initialize Connectivity Tester
         
         Args:
             cluster_info: AKS cluster information dictionary
-            run_azure_cli_func: Function to execute Azure CLI commands
+            azure_cli_executor: AzureCLIExecutor instance for executing Azure CLI commands
             dns_analyzer: Optional DNS analyzer for private DNS validation
             verbose: Whether to show detailed test output
         """
         self.cluster_info = cluster_info
-        self.run_azure_cli = run_azure_cli_func
+        self.azure_cli_executor = azure_cli_executor
         self.dns_analyzer = dns_analyzer
         self.verbose = verbose
         self.logger = logging.getLogger("aks_net_diagnostics.connectivity_tester")
@@ -143,7 +143,7 @@ class ConnectivityTester:
             return instances
 
         try:
-            vmss_list = self.run_azure_cli(['vmss', 'list', '-g', mc_rg, '-o', 'json'])
+            vmss_list = self.azure_cli_executor.execute(['vmss', 'list', '-g', mc_rg, '-o', 'json'])
         except RuntimeError as exc:
             self.logger.info(f"Error listing VMSS in {mc_rg}: {exc}")
             return instances
@@ -157,7 +157,7 @@ class ConnectivityTester:
                 continue
 
             try:
-                vmss_nodes = self.run_azure_cli(['vmss', 'list-instances', '-g', mc_rg, '-n', vmss_name, '-o', 'json'])
+                vmss_nodes = self.azure_cli_executor.execute(['vmss', 'list-instances', '-g', mc_rg, '-n', vmss_name, '-o', 'json'])
             except RuntimeError as exc:
                 self.logger.info(f"Error listing VMSS instances for {vmss_name}: {exc}")
                 continue
@@ -212,7 +212,7 @@ class ConnectivityTester:
             {
                 "name": "Internet Connectivity",
                 "description": "Test outbound internet connectivity to MCR (Microsoft Container Registry)",
-                "command": "curl -v --insecure --proxy-insecure https://mcr.microsoft.com/v2/",
+                "command": "curl -v --max-time 60 --insecure --proxy-insecure https://mcr.microsoft.com/v2/",
                 "expected_keywords": ["200", "401", "unauthorized"],
                 "critical": False,
                 "skip_group": "MCR DNS Resolution"  # Depends on MCR DNS
@@ -229,8 +229,8 @@ class ConnectivityTester:
             {
                 "name": "API Server HTTPS Connectivity",
                 "description": "Test HTTPS connection to API server",
-                "command": f"curl -k -s -o /dev/null -w '%{{http_code}}' --connect-timeout 10 https://{api_server_fqdn}:443",
-                "expected_keywords": ["200", "401", "403"],  # Any HTTP response indicates connectivity
+                "command": f"curl -v -k --max-time 15 https://{api_server_fqdn}:443",
+                "expected_keywords": ["200", "401", "403", "HTTP/"],  # Any HTTP response indicates connectivity
                 "critical": True,
                 "skip_group": "API Server DNS Resolution"  # Depends on API Server DNS
             }
@@ -365,9 +365,20 @@ class ConnectivityTester:
         return result
     
     def _run_vmss_command(self, cmd: List[str]) -> Any:
-        """Execute Azure CLI command for VMSS run-command"""
+        """
+        Execute Azure CLI command for VMSS run-command with extended timeout
+        
+        VMSS run-command operations can take significantly longer than standard
+        Azure CLI commands due to:
+        - Command queuing on the VMSS instance
+        - Extension execution time
+        - Network latency for command delivery and result retrieval
+        
+        Using 300 seconds (5 minutes) timeout instead of default 90 seconds.
+        """
         try:
-            return self.run_azure_cli(cmd)
+            # Use extended timeout of 300 seconds (5 minutes) for VMSS run-command
+            return self.azure_cli_executor.execute(cmd, timeout=300)
         except RuntimeError as e:
             self.logger.debug(f"VMSS command failed: {e}")
             raise

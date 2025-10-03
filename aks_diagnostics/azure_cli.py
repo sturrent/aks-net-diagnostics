@@ -31,13 +31,14 @@ class AzureCLIExecutor:
         self.logger = logging.getLogger("aks_net_diagnostics.azure_cli")
         self.cache_manager = cache_manager
     
-    def execute(self, cmd: List[str], expect_json: bool = True) -> Any:
+    def execute(self, cmd: List[str], expect_json: bool = True, timeout: Optional[int] = None) -> Any:
         """
         Execute Azure CLI command
         
         Args:
             cmd: Command arguments (without 'az' prefix)
             expect_json: Whether to parse output as JSON
+            timeout: Optional custom timeout in seconds (defaults to AZURE_CLI_TIMEOUT)
             
         Returns:
             Command output (parsed JSON if expect_json=True, raw string otherwise)
@@ -54,6 +55,9 @@ class AzureCLIExecutor:
         
         cmd_str = ' '.join(cmd)
         
+        # Use custom timeout or default
+        cmd_timeout = timeout if timeout is not None else self.AZURE_CLI_TIMEOUT
+        
         # Check cache first
         if self.cache_manager:
             cached_result = self.cache_manager.get(cmd_str)
@@ -66,7 +70,7 @@ class AzureCLIExecutor:
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=self.AZURE_CLI_TIMEOUT,
+                timeout=cmd_timeout,
                 shell=IS_WINDOWS
             )
             
@@ -91,9 +95,9 @@ class AzureCLIExecutor:
                 return output
             
         except subprocess.TimeoutExpired as e:
-            self.logger.error(f"Azure CLI command timed out after {self.AZURE_CLI_TIMEOUT}s: {cmd_str}")
+            self.logger.error(f"Azure CLI command timed out after {cmd_timeout}s: {cmd_str}")
             raise AzureCLIError(
-                f"Command timed out after {self.AZURE_CLI_TIMEOUT}s",
+                f"Command timed out after {cmd_timeout}s",
                 command=cmd_str
             ) from e
         

@@ -19,20 +19,22 @@ class TestConnectivityTester(unittest.TestCase):
             'fqdn': 'test-cluster.hcp.eastus.azmk8s.io'
         }
         
-        self.mock_run_azure_cli = MagicMock()
+        # Create a mock executor with execute method
+        self.mock_azure_cli_executor = MagicMock()
+        self.mock_azure_cli_executor.execute = MagicMock()
     
     def test_initialization(self):
         """Test tester initialization"""
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         
         self.assertEqual(tester.cluster_info, self.base_cluster_info)
-        self.assertEqual(tester.run_azure_cli, self.mock_run_azure_cli)
+        self.assertEqual(tester.azure_cli_executor, self.mock_azure_cli_executor)
         self.assertIsNotNone(tester.logger)
         self.assertFalse(tester.probe_results['enabled'])
     
     def test_probe_disabled(self):
         """Test when connectivity probing is disabled"""
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         result = tester.test_connectivity(enable_probes=False)
         
         self.assertFalse(result['enabled'])
@@ -45,7 +47,7 @@ class TestConnectivityTester(unittest.TestCase):
             'powerState': {'code': 'Stopped'}
         }
         
-        tester = ConnectivityTester(cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(cluster_info, self.mock_azure_cli_executor)
         result = tester.test_connectivity(enable_probes=True)
         
         self.assertFalse(result['enabled'])
@@ -59,16 +61,16 @@ class TestConnectivityTester(unittest.TestCase):
             'provisioningState': 'Failed'
         }
         
-        tester = ConnectivityTester(cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(cluster_info, self.mock_azure_cli_executor)
         # Should continue but log warning
         # We can't easily test logging, so just ensure it doesn't crash
         tester.test_connectivity(enable_probes=True)
     
     def test_no_vmss_instances(self):
         """Test when no VMSS instances are found"""
-        self.mock_run_azure_cli.return_value = []
+        self.mock_azure_cli_executor.return_value = []
         
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         result = tester.test_connectivity(enable_probes=True)
         
         self.assertTrue(result['enabled'])
@@ -76,7 +78,7 @@ class TestConnectivityTester(unittest.TestCase):
     
     def test_get_api_server_fqdn_public(self):
         """Test getting API server FQDN for public cluster"""
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         fqdn = tester._get_api_server_fqdn()
         
         self.assertEqual(fqdn, 'test-cluster.hcp.eastus.azmk8s.io')
@@ -88,7 +90,7 @@ class TestConnectivityTester(unittest.TestCase):
             'privateFqdn': 'test-cluster.privatelink.eastus.azmk8s.io'
         }
         
-        tester = ConnectivityTester(cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(cluster_info, self.mock_azure_cli_executor)
         fqdn = tester._get_api_server_fqdn()
         
         self.assertEqual(fqdn, 'test-cluster.privatelink.eastus.azmk8s.io')
@@ -97,7 +99,7 @@ class TestConnectivityTester(unittest.TestCase):
         """Test when no FQDN is available"""
         cluster_info = {'name': 'test-cluster'}
         
-        tester = ConnectivityTester(cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(cluster_info, self.mock_azure_cli_executor)
         fqdn = tester._get_api_server_fqdn()
         
         self.assertIsNone(fqdn)
@@ -112,7 +114,7 @@ class TestConnectivityTester(unittest.TestCase):
             ]
         }
         
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         result = tester._parse_vmss_message(message)
         
         self.assertEqual(result['stdout'], 'test output')
@@ -129,7 +131,7 @@ class TestConnectivityTester(unittest.TestCase):
             ]
         }
         
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         result = tester._parse_vmss_message(message)
         
         self.assertEqual(result['stdout'], '')
@@ -138,7 +140,7 @@ class TestConnectivityTester(unittest.TestCase):
     
     def test_check_expected_output(self):
         """Test checking for expected output"""
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         
         # Should find keyword
         self.assertTrue(tester._check_expected_output('Connection successful', ['successful']))
@@ -154,7 +156,7 @@ class TestConnectivityTester(unittest.TestCase):
     
     def test_check_expected_output_combined_http(self):
         """Test combined output check for HTTP tests"""
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         
         test = {'name': 'HTTP Connectivity'}
         stdout = '200'
@@ -170,7 +172,7 @@ class TestConnectivityTester(unittest.TestCase):
     
     def test_check_expected_output_combined_dns(self):
         """Test combined output check for DNS tests"""
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         
         test = {'name': 'DNS Resolution'}
         stdout = 'Server: 168.63.129.16\\nAddress: 10.0.0.1'
@@ -189,7 +191,7 @@ Non-authoritative answer:
 Name: test-cluster.privatelink.eastus.azmk8s.io
 Address: 10.0.0.5'''
         
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         result = tester._validate_private_dns_resolution(nslookup_output, 'test-cluster.privatelink.eastus.azmk8s.io')
         
         self.assertTrue(result)
@@ -203,7 +205,7 @@ Non-authoritative answer:
 Name: test-cluster.eastus.azmk8s.io
 Address: 20.62.130.50'''
         
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         result = tester._validate_private_dns_resolution(nslookup_output, 'test-cluster.eastus.azmk8s.io')
         
         self.assertFalse(result)
@@ -215,14 +217,14 @@ Address: 168.63.129.16
 
 ** server can't find test-cluster.privatelink.eastus.azmk8s.io: NXDOMAIN'''
         
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         result = tester._validate_private_dns_resolution(nslookup_output, 'test-cluster.privatelink.eastus.azmk8s.io')
         
         self.assertFalse(result)
     
     def test_list_ready_vmss_instances_success(self):
         """Test listing ready VMSS instances"""
-        self.mock_run_azure_cli.side_effect = [
+        self.mock_azure_cli_executor.execute.side_effect = [
             # First call: list VMSS
             [{'name': 'aks-agentpool-vmss'}],
             # Second call: list instances
@@ -235,7 +237,7 @@ Address: 168.63.129.16
             ]
         ]
         
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         instances = tester._list_ready_vmss_instances()
         
         self.assertEqual(len(instances), 1)
@@ -248,16 +250,16 @@ Address: 168.63.129.16
         """Test when node resource group is missing"""
         cluster_info = {'name': 'test-cluster'}
         
-        tester = ConnectivityTester(cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(cluster_info, self.mock_azure_cli_executor)
         instances = tester._list_ready_vmss_instances()
         
         self.assertEqual(len(instances), 0)
     
     def test_list_ready_vmss_instances_error(self):
         """Test handling of Azure CLI errors"""
-        self.mock_run_azure_cli.side_effect = RuntimeError("Azure CLI error")
+        self.mock_azure_cli_executor.execute.side_effect = RuntimeError("Azure CLI error")
         
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         instances = tester._list_ready_vmss_instances()
         
         self.assertEqual(len(instances), 0)
@@ -278,7 +280,7 @@ Address: 168.63.129.16
     
     def test_curl_error_detection(self):
         """Test that curl errors are properly detected even with exit code 0"""
-        tester = ConnectivityTester(self.base_cluster_info, self.mock_run_azure_cli)
+        tester = ConnectivityTester(self.base_cluster_info, self.mock_azure_cli_executor)
         
         # Simulate response with curl SSL error (like the firewall blocking case)
         test = {

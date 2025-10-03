@@ -472,7 +472,7 @@ EXAMPLES:
     
     def check_api_connectivity(self):
         """Check API server connectivity using ConnectivityTester module"""
-        tester = ConnectivityTester(self.cluster_info, self.azure_cli_executor.execute, self.dns_analyzer, verbose=self.verbose)
+        tester = ConnectivityTester(self.cluster_info, self.azure_cli_executor, self.dns_analyzer, verbose=self.verbose)
         self.api_probe_results = tester.test_connectivity(enable_probes=self.probe_test)
     
     def analyze_misconfigurations(self):
