@@ -2,6 +2,8 @@
 
 This document provides detailed technical information about the AKS Network Diagnostics tool architecture, design decisions, and module organization.
 
+> **Note**: This document uses Mermaid diagrams for visual representation. If viewing on GitHub, the diagrams will render automatically. For local viewing, use a Markdown viewer that supports Mermaid (VS Code with Markdown Preview Mermaid Support extension, or online viewers like https://mermaid.live).
+
 ## 🏗️ Architecture Overview
 
 ### Design Philosophy
@@ -13,58 +15,94 @@ The tool follows a **modular, layered architecture** with clear separation of co
 3. **Analysis Layer** - Specialized analyzers for different aspects
 4. **Reporting Layer** - Formats and outputs findings
 
-### Architecture Diagram
+### High-Level Architecture
 
+```mermaid
+graph TB
+    subgraph "Orchestration Layer"
+        Main[aks-net-diagnostics.py<br/>Main Orchestrator]
+    end
+    
+    subgraph "Data Collection Layer"
+        CDC[ClusterDataCollector<br/>Data Gathering]
+        AzCLI[AzureCLIExecutor<br/>Azure CLI Execution]
+        Cache[CacheManager<br/>Response Caching]
+    end
+    
+    subgraph "Analysis Layer"
+        NSG[NSGAnalyzer<br/>Network Security]
+        DNS[DNSAnalyzer<br/>DNS Validation]
+        RT[RouteTableAnalyzer<br/>UDR Analysis]
+        API[APIServerAccessAnalyzer<br/>Access Control]
+        CT[ConnectivityTester<br/>Active Probing]
+        OB[OutboundConnectivityAnalyzer<br/>Egress Analysis]
+    end
+    
+    subgraph "Reporting Layer"
+        MA[MisconfigurationAnalyzer<br/>Finding Correlation]
+        RG[ReportGenerator<br/>Output Formatting]
+    end
+    
+    subgraph "Support Modules"
+        Val[InputValidator<br/>Security]
+        Mod[Models<br/>Data Structures]
+        Exc[Exceptions<br/>Error Handling]
+    end
+    
+    Main --> CDC
+    Main --> NSG & DNS & RT & API & CT & OB
+    Main --> MA --> RG
+    
+    CDC --> AzCLI
+    NSG & DNS & RT & API & CT & OB --> AzCLI
+    
+    AzCLI --> Cache
+    AzCLI --> Val
+    
+    NSG & DNS & RT & API & CT & OB --> Mod
+    MA --> Mod
+    
+    style Main fill:#e1f5ff
+    style CDC fill:#fff4e1
+    style AzCLI fill:#fff4e1
+    style NSG fill:#e8f5e9
+    style DNS fill:#e8f5e9
+    style RT fill:#e8f5e9
+    style API fill:#e8f5e9
+    style CT fill:#e8f5e9
+    style OB fill:#e8f5e9
+    style MA fill:#f3e5f5
+    style RG fill:#f3e5f5
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    aks-net-diagnostics.py                       │
-│                     (Main Orchestrator)                         │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                ┌────────────┴────────────┐
-                │                         │
-        ┌───────▼────────┐       ┌───────▼────────┐
-        │ Data Collection │       │    Analysis    │
-        └───────┬────────┘       └───────┬────────┘
-                │                         │
-    ┌───────────┴───────────┐ ┌──────────┴──────────┐
-    │                       │ │                     │
-┌───▼────────────┐  ┌──────▼─────┐  ┌─────▼──────────┐
-│ClusterData     │  │AzureCLI    │  │NSGAnalyzer     │
-│Collector       │  │Executor    │  │                │
-│                │  │            │  └────────────────┘
-└────────────────┘  └────────────┘  
-                                    ┌─────────────────┐
-                                    │DNSAnalyzer      │
-                                    │                 │
-                                    └─────────────────┘
-                                    
-                                    ┌─────────────────┐
-                                    │RouteTable       │
-                                    │Analyzer         │
-                                    └─────────────────┘
-                                    
-                                    ┌─────────────────┐
-                                    │APIServer        │
-                                    │Analyzer         │
-                                    └─────────────────┘
-                                    
-                                    ┌─────────────────┐
-                                    │Connectivity     │
-                                    │Tester           │
-                                    └─────────────────┘
-                                    
-                                    ┌─────────────────┐
-                                    │Outbound         │
-                                    │Analyzer         │
-                                    └─────────────────┘
 
-        ┌───────────────────────────────────────────┐
-        │         Output & Reporting                │
-        ├───────────────────────────────────────────┤
-        │  ReportGenerator                          │
-        │  MisconfigurationAnalyzer                 │
-        └───────────────────────────────────────────┘
+### Component Interaction Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Main as Main Script
+    participant CDC as ClusterDataCollector
+    participant Azure as Azure CLI
+    participant Analyzer as Analyzers
+    participant Report as ReportGenerator
+    
+    User->>Main: Run diagnostic
+    Main->>CDC: collect_all()
+    CDC->>Azure: Fetch cluster info
+    Azure-->>CDC: Cluster data
+    CDC->>Azure: Fetch VNet info
+    Azure-->>CDC: VNet data
+    CDC->>Azure: Fetch VMSS info
+    Azure-->>CDC: VMSS data
+    CDC-->>Main: Complete dataset
+    
+    Main->>Analyzer: analyze(cluster_data)
+    Analyzer->>Azure: Query specific resources
+    Azure-->>Analyzer: Resource details
+    Analyzer-->>Main: Findings
+    
+    Main->>Report: generate_report(findings)
+    Report-->>User: Console output + JSON
 ```
 
 ## 📦 Module Breakdown
@@ -511,7 +549,108 @@ def test_component_when_condition_then_result(self):
 - JSON reports don't include secrets
 - File permissions: 0600 (owner read/write only)
 
-## 📝 Code Quality Metrics
+## � Distribution & Build Process
+
+### Single-File Distribution (.pyz)
+
+The tool is distributed as a **Python zipapp** - a single executable `.pyz` file containing all modules.
+
+#### Build Process
+
+```mermaid
+graph LR
+    A[Source Files] --> B[build_zipapp.py]
+    B --> C[Create build_temp/]
+    C --> D[Copy __main__.py]
+    C --> E[Copy aks_diagnostics/]
+    D & E --> F[zipapp.create_archive]
+    F --> G[aks-net-diagnostics.pyz<br/>~57 KB]
+    
+    style G fill:#90EE90
+```
+
+#### What Gets Bundled
+
+```mermaid
+graph TB
+    subgraph "aks-net-diagnostics.pyz"
+        Main[__main__.py<br/>Main Orchestrator]
+        
+        subgraph "aks_diagnostics/"
+            CDC[cluster_data_collector.py]
+            AzCLI[azure_cli.py]
+            Cache[cache.py]
+            NSG[nsg_analyzer.py]
+            DNS[dns_analyzer.py]
+            RT[route_table_analyzer.py]
+            API[api_server_analyzer.py]
+            CT[connectivity_tester.py]
+            OB[outbound_analyzer.py]
+            MA[misconfiguration_analyzer.py]
+            RG[report_generator.py]
+            Val[validators.py]
+            Mod[models.py]
+            Base[base_analyzer.py]
+            Exc[exceptions.py]
+        end
+    end
+    
+    Main --> CDC & NSG & DNS & RT & API & CT & OB & MA & RG
+    CDC --> AzCLI
+    NSG & DNS & RT & API & CT & OB --> AzCLI
+    AzCLI --> Cache & Val
+    
+    style Main fill:#e1f5ff
+```
+
+#### Release Workflow
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Git as GitHub
+    participant GHA as GitHub Actions
+    participant Rel as Release Assets
+    participant User as End User
+    
+    Dev->>Git: git tag v2.1.0
+    Dev->>Git: git push origin v2.1.0
+    Git->>GHA: Trigger on tag push
+    GHA->>GHA: Run build_zipapp.py
+    GHA->>GHA: Test .pyz file
+    GHA->>Rel: Create Release
+    GHA->>Rel: Upload aks-net-diagnostics.pyz
+    User->>Rel: Download .pyz
+    User->>User: python aks-net-diagnostics.pyz
+```
+
+#### Distribution Advantages
+
+| Aspect | Modular Source | Single .pyz File |
+|--------|---------------|------------------|
+| **Size** | ~5,000 lines across 16 files | 57 KB single file |
+| **Installation** | `git clone` required | Download one file |
+| **Import Issues** | Possible (PYTHONPATH) | None (all bundled) |
+| **Updates** | `git pull` | Download new .pyz |
+| **Portability** | Requires directory structure | Single file, easy to share |
+| **Development** | ✅ Ideal | ❌ Not editable |
+| **End Users** | ❌ Complex | ✅ Simple |
+
+#### Build Script Details
+
+The `build_zipapp.py` script:
+1. Creates temporary `build_temp/` directory
+2. Copies `aks-net-diagnostics.py` as `__main__.py`
+3. Copies `aks_diagnostics/` module (excluding `__pycache__`)
+4. Uses `zipapp.create_archive()` to bundle with compression
+5. Cleans up temporary directory
+6. Outputs `aks-net-diagnostics.pyz` (~57 KB)
+
+**Build time**: ~10 seconds  
+**Compression**: gzip-compressed ZIP archive  
+**Interpreter**: Shebang for `/usr/bin/env python3`
+
+## �📝 Code Quality Metrics
 
 ### Maintainability
 - **Main Script**: 451 lines (focused on orchestration)

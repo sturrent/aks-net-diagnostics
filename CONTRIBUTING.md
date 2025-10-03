@@ -148,6 +148,69 @@ refactor: Extract data collection to separate module
 - [ ] Code follows project style guidelines
 - [ ] Type hints added for all functions
 - [ ] Docstrings added for public methods
+- [ ] Documentation updated (README.md, ARCHITECTURE.md if applicable)
+- [ ] `.pyz` build tested (`python build_zipapp.py && python aks-net-diagnostics.pyz --help`)
+- [ ] No breaking changes (or clearly documented if unavoidable)
+
+## 🏗️ Building the Distribution
+
+### Creating the Single-File Distribution
+
+The project uses Python's `zipapp` module to create a single-file executable:
+
+```bash
+# Build the .pyz file
+python build_zipapp.py
+
+# Verify it works
+python aks-net-diagnostics.pyz --help
+
+# Test with actual cluster (if available)
+python aks-net-diagnostics.pyz -n myCluster -g myRG
+```
+
+### Testing the .pyz File
+
+Before submitting a PR that modifies core functionality:
+
+```bash
+# 1. Build the zipapp
+python build_zipapp.py
+
+# 2. Run unit tests on source code
+pytest -v
+
+# 3. Test the .pyz file functionality
+python aks-net-diagnostics.pyz --help
+python aks-net-diagnostics.pyz -n test-cluster -g test-rg  # If you have test resources
+
+# 4. Verify file size is reasonable (~57 KB)
+ls -lh aks-net-diagnostics.pyz  # Linux/macOS
+Get-Item aks-net-diagnostics.pyz | Format-List Length  # Windows
+```
+
+### Release Process (Maintainers)
+
+Releases are automated via GitHub Actions:
+
+```bash
+# 1. Update version in code (if applicable)
+# 2. Commit all changes
+git add .
+git commit -m "chore: Prepare release v2.2.0"
+
+# 3. Create and push tag
+git tag -a v2.2.0 -m "Release version 2.2.0"
+git push origin v2.2.0
+
+# GitHub Actions will automatically:
+# - Build aks-net-diagnostics.pyz
+# - Run tests on the .pyz file
+# - Create a GitHub Release
+# - Attach the .pyz file to the release
+```
+
+The release workflow is defined in `.github/workflows/release.yml`.
 - [ ] README.md updated (if adding user-facing features)
 - [ ] Commit messages follow conventional commits format
 - [ ] No merge conflicts with main branch
