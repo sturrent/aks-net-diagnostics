@@ -596,7 +596,7 @@ class ReportGenerator:
             for finding in self.findings:
                 severity_icon = {
                     'critical': '[!]',
-                    'error': 'X',
+                    'error': '[X]',
                     'warning': '[!]',
                     'info': '[i]'
                 }.get(finding.get('severity', 'info'), '[i]')
