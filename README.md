@@ -54,7 +54,48 @@ python aks-net-diagnostics.py -n my-cluster -g my-resource-group --probe-test
 - **Azure Authentication**: Run `az login` before using the tool
 - **Permissions**: Reader access to AKS cluster and related network resources
 
-## 🔎 What It Analyzes
+## � Installation & Usage
+
+### Option 1: Single-File Distribution (Recommended for Quick Use)
+
+Download and run the pre-built `.pyz` file from [Releases](https://github.com/sturrent/aks-net-diagnostics/releases):
+
+```bash
+# Download the latest release
+wget https://github.com/sturrent/aks-net-diagnostics/releases/latest/download/aks-net-diagnostics.pyz
+
+# Run directly with Python
+python aks-net-diagnostics.pyz -n myCluster -g myResourceGroup
+
+# Or make it executable (Linux/macOS)
+chmod +x aks-net-diagnostics.pyz
+./aks-net-diagnostics.pyz -n myCluster -g myResourceGroup
+```
+
+**Advantages:**
+- ✅ Single file (~57 KB)
+- ✅ No installation required
+- ✅ Just download and run
+- ✅ All modules bundled inside
+
+### Option 2: Clone Repository (For Development/Customization)
+
+```bash
+git clone https://github.com/sturrent/aks-net-diagnostics.git
+cd aks-net-diagnostics
+python aks-net-diagnostics.py -n myCluster -g myResourceGroup
+```
+
+### Building Your Own .pyz File
+
+To create the single-file distribution:
+
+```bash
+python build_zipapp.py
+# Creates: aks-net-diagnostics.pyz
+```
+
+## �🔎 What It Analyzes
 
 ### Network Components
 - ✅ **VNet Configuration**: Topology, address spaces, peerings
