@@ -195,57 +195,6 @@ EXAMPLES:
                 # Validate user-provided filename
                 self.json_report = InputValidator.validate_output_path(self.json_report)
     
-    def run_azure_cli(self, cmd: List[str], expect_json: bool = True) -> Any:
-        """Run Azure CLI command and return result"""
-        # Validate command arguments to prevent injection
-        InputValidator.validate_azure_cli_command(cmd)
-        
-        cmd_str = ' '.join(cmd)
-        
-        # Check cache first
-        if self.cache and cmd_str in self._cache:
-            return self._cache[cmd_str]
-        
-        try:
-            result = subprocess.run(
-                ['az'] + cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=AZURE_CLI_TIMEOUT,
-                shell=IS_WINDOWS  # Windows needs shell=True for .cmd files
-            )
-            
-            output = result.stdout.strip()
-            if not output:
-                return {} if expect_json else ""
-            
-            if expect_json:
-                try:
-                    data = json.loads(output)
-                    # Cache the result
-                    if self.cache:
-                        self._cache[cmd_str] = data
-                    return data
-                except json.JSONDecodeError:
-                    # If JSON parsing fails, return the raw output
-                    return output
-            else:
-                return output
-            
-        except subprocess.TimeoutExpired as e:
-            self.logger.error(f"Azure CLI command timed out after {AZURE_CLI_TIMEOUT}s: {cmd_str}")
-            raise RuntimeError(f"Azure CLI command timed out: {cmd_str}") from e
-        except subprocess.CalledProcessError as e:
-            stderr_output = e.stderr.strip() if e.stderr else ''
-            stdout_output = e.stdout.strip() if e.stdout else ''
-            self.logger.error(f"Azure CLI command failed: {cmd_str}")
-            if stderr_output:
-                self.logger.error(f"Error: {stderr_output}")
-            elif stdout_output:
-                self.logger.error(f"Output: {stdout_output}")
-            raise RuntimeError(f"Azure CLI command failed: {cmd_str}") from e
-    
     def check_prerequisites(self):
         """Check if required tools are available"""
         # Check Azure CLI
@@ -270,7 +219,7 @@ EXAMPLES:
                 raise ValueError(f"Failed to set subscription: {self.subscription}")
         else:
             # Get current subscription
-            current_sub = self.run_azure_cli(['account', 'show', '--query', 'id', '-o', 'tsv'], expect_json=False)
+            current_sub = self.azure_cli_executor.execute(['account', 'show', '--query', 'id', '-o', 'tsv'], expect_json=False)
             if isinstance(current_sub, str) and current_sub.strip():
                 self.subscription = current_sub.strip()
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
@@ -281,7 +230,7 @@ EXAMPLES:
         
         # Get cluster info
         cluster_cmd = ['aks', 'show', '-n', self.aks_name, '-g', self.aks_rg, '-o', 'json']
-        cluster_result = self.run_azure_cli(cluster_cmd)
+        cluster_result = self.azure_cli_executor.execute(cluster_cmd)
         
         if not cluster_result or not isinstance(cluster_result, dict):
             raise ValueError(f"Failed to get cluster information for {self.aks_name}. Please check the cluster name and resource group.")
@@ -290,7 +239,7 @@ EXAMPLES:
         
         # Get agent pools
         agent_pools_cmd = ['aks', 'nodepool', 'list', '-g', self.aks_rg, '--cluster-name', self.aks_name, '-o', 'json']
-        agent_pools_result = self.run_azure_cli(agent_pools_cmd)
+        agent_pools_result = self.azure_cli_executor.execute(agent_pools_cmd)
         
         if isinstance(agent_pools_result, list):
             self.agent_pools = agent_pools_result
@@ -329,7 +278,7 @@ EXAMPLES:
             if vnet_name not in vnets_map:
                 # Get VNet information
                 vnet_cmd = ['network', 'vnet', 'show', '-n', vnet_name, '-g', vnet_rg, '-o', 'json']
-                vnet_info = self.run_azure_cli(vnet_cmd)
+                vnet_info = self.azure_cli_executor.execute(vnet_cmd)
                 
                 if vnet_info:
                     vnets_map[vnet_name] = {
@@ -343,7 +292,7 @@ EXAMPLES:
                     
                     # Get VNet peerings
                     peering_cmd = ['network', 'vnet', 'peering', 'list', '-g', vnet_rg, '--vnet-name', vnet_name, '-o', 'json']
-                    peerings = self.run_azure_cli(peering_cmd)
+                    peerings = self.azure_cli_executor.execute(peering_cmd)
                     
                     if isinstance(peerings, list):
                         for peering in peerings:
@@ -386,7 +335,7 @@ EXAMPLES:
         
         # List VMSS in the managed resource group
         vmss_cmd = ['vmss', 'list', '-g', mc_rg, '-o', 'json']
-        vmss_list = self.run_azure_cli(vmss_cmd)
+        vmss_list = self.azure_cli_executor.execute(vmss_cmd)
         
         if not isinstance(vmss_list, list):
             return
@@ -400,7 +349,7 @@ EXAMPLES:
             
             # Get VMSS network profile
             vmss_detail_cmd = ['vmss', 'show', '-n', vmss_name, '-g', mc_rg, '-o', 'json']
-            vmss_detail = self.run_azure_cli(vmss_detail_cmd)
+            vmss_detail = self.azure_cli_executor.execute(vmss_detail_cmd)
             
             if vmss_detail:
                 network_profile = vmss_detail.get('virtualMachineProfile', {}).get('networkProfile', {})
@@ -523,7 +472,7 @@ EXAMPLES:
     
     def check_api_connectivity(self):
         """Check API server connectivity using ConnectivityTester module"""
-        tester = ConnectivityTester(self.cluster_info, self.run_azure_cli, self.dns_analyzer, verbose=self.verbose)
+        tester = ConnectivityTester(self.cluster_info, self.azure_cli_executor.execute, self.dns_analyzer, verbose=self.verbose)
         self.api_probe_results = tester.test_connectivity(enable_probes=self.probe_test)
     
     def analyze_misconfigurations(self):
