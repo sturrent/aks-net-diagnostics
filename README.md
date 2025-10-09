@@ -12,7 +12,7 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 - **Active Testing**: Optional connectivity probes from cluster nodes
 - **Multiple Output Formats**: Console summary + detailed verbose + JSON export
 - **Security Focused**: NSG compliance, inter-node traffic validation
-- **Production Ready**: 147 unit tests, modular architecture
+- **Modular design**: 147 unit tests, modular architecture
 - **Detailed Reports**: Actionable recommendations for every finding
 
 ## Table of Contents
