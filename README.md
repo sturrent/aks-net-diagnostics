@@ -45,7 +45,9 @@ Download and run the pre-built `.pyz` file from [Releases](https://github.com/st
 ```bash
 # Download the latest release
 wget https://github.com/sturrent/aks-net-diagnostics/releases/latest/download/aks-net-diagnostics.pyz
+```
 
+```bash
 # Run directly with Python
 python aks-net-diagnostics.pyz -n myCluster -g myResourceGroup
 
