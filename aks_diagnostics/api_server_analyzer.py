@@ -95,7 +95,7 @@ class APIServerAccessAnalyzer:
             "severity": "warning",
             "issue": "API server access restricted",
             "description": f"API server has authorized IP ranges enabled with {len(authorized_ranges)} configured range(s). Only traffic from these IPs can access the API server.",
-            "recommendation": "Verify all necessary IP ranges are included. Use --verbose to see the full list of authorized ranges."
+            "recommendation": "Verify all necessary IP ranges are included. Use --details to see the full list of authorized ranges."
         })
         
         # Analyze each range for security implications

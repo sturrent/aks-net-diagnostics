@@ -2,7 +2,7 @@
 Report Generator for AKS Network Diagnostics
 
 This module handles generating and formatting diagnostic reports in multiple formats:
-- Console output (summary and verbose modes)
+- Console output (summary and detailed modes)
 - JSON output for programmatic consumption
 """
 
@@ -142,18 +142,18 @@ class ReportGenerator:
             self.logger.error(f"Failed to save JSON report: {e}")
             return False
     
-    def print_console_report(self, verbose: bool = False, json_report_path: Optional[str] = None):
+    def print_console_report(self, show_details: bool = False, json_report_path: Optional[str] = None):
         """
         Print console report
         
         Args:
-            verbose: Enable verbose output
+            show_details: Enable detailed output
             json_report_path: Path to JSON report if saved
         """
         print("\n" + "=" * 74)
         
-        if verbose:
-            self._print_verbose_report()
+        if show_details:
+            self._print_detailed_report()
         else:
             self._print_summary_report(json_report_path)
         
@@ -220,7 +220,7 @@ class ReportGenerator:
         else:
             # Show critical/error findings
             for finding in critical_findings:
-                # For cluster operation failures, show only the error code in non-verbose mode
+                # For cluster operation failures, show only the error code in summary mode
                 if finding.get('code') == 'CLUSTER_OPERATION_FAILURE' and finding.get('error_code'):
                     print(f"- [ERROR] Cluster failed with error: {finding.get('error_code')}")
                 else:
@@ -235,10 +235,10 @@ class ReportGenerator:
         print()
         if json_report_path:
             print(f"[DOC] JSON report saved to: {json_report_path}")
-        print("Tip: Use --verbose flag for detailed analysis")
+        print("Tip: Use --details flag for detailed analysis")
     
-    def _print_verbose_report(self):
-        """Print detailed verbose report"""
+    def _print_detailed_report(self):
+        """Print detailed report"""
         print("# AKS Network Assessment Report")
         print()
         print(f"**Cluster:** {self.cluster_name}")
@@ -551,7 +551,7 @@ class ReportGenerator:
         dest = rule.get('destinationAddressPrefix', 'Unknown')
         ports = rule.get('destinationPortRange', 'Unknown')
         
-        access_icon = '[OK]' if access.lower() == 'allow' else 'X'
+        access_icon = '[OK]' if access.lower() == 'allow' else '[X]'
         print(f"    - {access_icon} **{rule.get('name', 'Unknown')}** (Priority: {priority})")
         print(f"      - {direction} {protocol} to {dest} on ports {ports}")
     
@@ -583,7 +583,7 @@ class ReportGenerator:
             # Display findings summary
             print("**Findings Summary:**")
             if critical_count > 0:
-                print(f"- [!] {critical_count} Critical issue(s)")
+                print(f"- [X] {critical_count} Critical issue(s)")
             if error_count > 0:
                 print(f"- [X] {error_count} Error issue(s)")
             if warning_count > 0:
@@ -595,7 +595,7 @@ class ReportGenerator:
             # Display all findings in detail
             for finding in self.findings:
                 severity_icon = {
-                    'critical': '[!]',
+                    'critical': '[X]',
                     'error': '[X]',
                     'warning': '[!]',
                     'info': '[i]'

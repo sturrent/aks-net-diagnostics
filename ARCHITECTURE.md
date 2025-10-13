@@ -230,7 +230,7 @@ sequenceDiagram
 **Purpose**: Format and output diagnostic reports  
 **Outputs**:
 - Console summary report
-- Verbose detailed report
+- Detailed analysis report
 - JSON structured export
 
 **Features**:

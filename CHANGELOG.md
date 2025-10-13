@@ -60,7 +60,7 @@ First stable release of the AKS Network Diagnostics tool with comprehensive netw
 - `--subscription`: Azure subscription ID override
 - `--probe-test`: Enable active connectivity testing from cluster nodes
 - `--json-report`: Export findings to JSON file
-- `--verbose`: Detailed console output
+- `--details`: Detailed console output
 - `--cache`: Enable response caching for faster re-runs
 - `--version`: Show version and exit
 

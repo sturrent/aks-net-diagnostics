@@ -53,12 +53,12 @@ class OutboundConnectivityAnalyzer:
         self.outbound_ips: List[str] = []
         self.outbound_analysis: Dict[str, Any] = {}
     
-    def analyze(self, verbose: bool = False) -> Dict[str, Any]:
+    def analyze(self, show_details: bool = False) -> Dict[str, Any]:
         """
         Analyze outbound connectivity configuration
         
         Args:
-            verbose: Enable verbose logging
+            show_details: Enable detailed logging
             
         Returns:
             Dictionary containing outbound connectivity analysis results
@@ -70,11 +70,11 @@ class OutboundConnectivityAnalyzer:
         
         # Analyze based on configured outbound type
         if outbound_type == 'loadBalancer':
-            self._analyze_load_balancer_outbound(verbose)
+            self._analyze_load_balancer_outbound(show_details)
         elif outbound_type == 'userDefinedRouting':
             self._analyze_udr_outbound()
         elif outbound_type == 'managedNATGateway':
-            self._analyze_nat_gateway_outbound(verbose)
+            self._analyze_nat_gateway_outbound(show_details)
         
         # Always check for UDRs on node subnets regardless of outbound type
         # This helps detect scenarios where Azure Firewall is used with Load Balancer outbound
@@ -225,19 +225,19 @@ class OutboundConnectivityAnalyzer:
             else:
                 self.logger.warning(f"    [!]  {message}")
     
-    def _analyze_load_balancer_outbound(self, verbose: bool = False) -> None:
+    def _analyze_load_balancer_outbound(self, show_details: bool = False) -> None:
         """
         Analyze load balancer outbound configuration
         
         Args:
-            verbose: Enable verbose logging
+            show_details: Enable detailed logging
         """
         self.logger.info("  - Analyzing Load Balancer outbound configuration...")
         
         # Get the managed cluster's load balancer
         mc_rg = self.cluster_info.get('nodeResourceGroup', '')
         if not mc_rg:
-            if verbose:
+            if show_details:
                 self.logger.info("    No node resource group found")
             return
         
@@ -246,7 +246,7 @@ class OutboundConnectivityAnalyzer:
         load_balancers = self.azure_cli.execute(lb_cmd)
         
         if not isinstance(load_balancers, list):
-            if verbose:
+            if show_details:
                 self.logger.info(f"    No load balancers found in {mc_rg}")
             return
         
@@ -304,7 +304,7 @@ class OutboundConnectivityAnalyzer:
                                     self.outbound_ips.append(ip_address)
         
         # Summary of outbound IP discovery will be handled by _display_outbound_summary
-        if verbose and not self.outbound_ips:
+        if show_details and not self.outbound_ips:
             self.logger.info("    No outbound IPs detected")
     
     def _analyze_udr_outbound(self) -> None:
@@ -323,19 +323,19 @@ class OutboundConnectivityAnalyzer:
             "internetRoutes": udr_analysis.get("internetRoutes", [])
         }
     
-    def _analyze_nat_gateway_outbound(self, verbose: bool = False) -> None:
+    def _analyze_nat_gateway_outbound(self, show_details: bool = False) -> None:
         """
         Analyze NAT Gateway outbound configuration
         
         Args:
-            verbose: Enable verbose logging
+            show_details: Enable detailed logging
         """
         self.logger.info("  - Analyzing NAT Gateway configuration...")
         
         # Get the managed cluster's resource group
         mc_rg = self.cluster_info.get('nodeResourceGroup', '')
         if not mc_rg:
-            if verbose:
+            if show_details:
                 self.logger.info("    No node resource group found")
             return
         
@@ -344,7 +344,7 @@ class OutboundConnectivityAnalyzer:
         nat_gateways = self.azure_cli.execute(natgw_cmd)
         
         if not isinstance(nat_gateways, list):
-            if verbose:
+            if show_details:
                 self.logger.info(f"    No NAT Gateways found in {mc_rg}")
             return
         
@@ -369,7 +369,7 @@ class OutboundConnectivityAnalyzer:
                         ip_address = public_ip_info.get('ipAddress', '')
                         if ip_address:
                             self.outbound_ips.append(ip_address)
-                            if verbose:
+                            if show_details:
                                 self.logger.info(f"      Public IP: {ip_address}")
             
             # Extract IPs from public IP prefixes
@@ -381,7 +381,7 @@ class OutboundConnectivityAnalyzer:
                         ip_prefix = prefix_info.get('ipPrefix', '')
                         if ip_prefix:
                             # For prefixes, we'll note the range but also try to get individual IPs
-                            if verbose:
+                            if show_details:
                                 self.logger.info(f"      Public IP Prefix: {ip_prefix}")
                             # Extract the first IP from the prefix for outbound IP tracking
                             try:
@@ -392,7 +392,7 @@ class OutboundConnectivityAnalyzer:
                             except:
                                 self.outbound_ips.append(f"{ip_prefix} (prefix)")
         
-        if not self.outbound_ips and verbose:
+        if not self.outbound_ips and show_details:
             self.logger.info("    No outbound IPs detected from NAT Gateway")
     
     def _get_public_ip_details(self, public_ip_id: str) -> Optional[Dict[str, Any]]:

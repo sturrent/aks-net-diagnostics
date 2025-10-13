@@ -10,7 +10,7 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 
 - **Comprehensive Analysis**: 9 specialized analyzers for deep network diagnostics
 - **Active Testing**: Optional connectivity probes from cluster nodes
-- **Multiple Output Formats**: Console summary + detailed verbose + JSON export
+- **Multiple Output Formats**: Console summary + detailed output + JSON export
 - **Security Focused**: NSG compliance, inter-node traffic validation
 - **Modular design**: 147 unit tests, modular architecture
 - **Detailed Reports**: Actionable recommendations for every finding
@@ -86,8 +86,8 @@ python aks-net-diagnostics.pyz -n my-cluster -g my-resource-group
 # OR using the source code
 python aks-net-diagnostics.py -n my-cluster -g my-resource-group
 
-# With verbose output
-python aks-net-diagnostics.pyz -n my-cluster -g my-resource-group --verbose
+# With detailed output
+python aks-net-diagnostics.pyz -n my-cluster -g my-resource-group --details
 
 # Save JSON report with auto-generated filename
 python aks-net-diagnostics.pyz -n my-cluster -g my-resource-group --json-report
@@ -153,7 +153,7 @@ For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)
 |--------|-------------|---------|
 | `-n <NAME>` | AKS cluster name (required) | `-n my-cluster` |
 | `-g <GROUP>` | Resource group name (required) | `-g my-rg` |
-| `--verbose` | Show detailed analysis and test results | `--verbose` |
+| `--details` | Show detailed analysis and test results | `--details` |
 | `--probe-test` | Enable active connectivity tests from nodes | `--probe-test` |
 | `--json-report [FILE]` | Save JSON report (optional filename) | `--json-report report.json` |
 | `--subscription <ID>` | Override Azure subscription | `--subscription abc-123` |
@@ -169,12 +169,12 @@ Quick health check of cluster network configuration:
 python aks-net-diagnostics.py -n production-cluster -g prod-rg
 ```
 
-### Detailed Verbose Analysis
+### Detailed Analysis
 
 Get comprehensive details about all network components:
 
 ```bash
-python aks-net-diagnostics.py -n production-cluster -g prod-rg --verbose
+python aks-net-diagnostics.py -n production-cluster -g prod-rg --details
 ```
 
 ### Active Connectivity Testing
@@ -202,7 +202,7 @@ python aks-net-diagnostics.py -n production-cluster -g prod-rg --json-report aud
 Comprehensive analysis with connectivity tests:
 
 ```bash
-python aks-net-diagnostics.py -n failed-cluster -g troubleshooting-rg --verbose --probe-test
+python aks-net-diagnostics.py -n failed-cluster -g troubleshooting-rg --details --probe-test
 ```
 
 ### Multi-Subscription Analysis
@@ -218,7 +218,7 @@ python aks-net-diagnostics.py -n cluster -g rg --subscription xxxxxxxx-xxxx-xxxx
 ### Example: Private Cluster with DNS Issues
 
 ```bash
-python aks-net-diagnostics.py -g my-resource-group -n my-private-cluster --verbose
+python aks-net-diagnostics.py -g my-resource-group -n my-private-cluster --details
 ```
 
 **Output:**
@@ -308,7 +308,7 @@ When using `--probe-test`, the tool executes connectivity tests directly from cl
 
 - Tests use **dependency checking**: HTTPS tests skip if DNS fails
 - **Timeouts configured**: 60s for MCR, 15s for API server
-- **Full error visibility**: Verbose curl output shows exact failure points
+- **Full error visibility**: Detailed curl output shows exact failure points
 - **VMSS timeout**: 5 minutes to account for queuing and execution
 
 ### Sample Output
@@ -336,7 +336,7 @@ When using `--probe-test`, the tool executes connectivity tests directly from cl
 ### Console Output
 
 - **Summary Mode** (default): High-level findings and recommendations
-- **Verbose Mode** (`--verbose`): Detailed analysis of all components
+- **Detailed Mode** (`--details`): Detailed analysis of all components
 - **Exit Codes**:
   - `0`: Analysis completed successfully
   - `1`: Unexpected error
@@ -438,7 +438,7 @@ python3 aks-net-diagnostics.py -n my-cluster -g my-rg
 If connectivity tests timeout:
 - Cluster nodes may be under heavy load
 - Network path may be experiencing latency
-- Use `--verbose` to see detailed error messages
+- Use `--details` to see detailed error messages
 - Re-run without `--probe-test` for static analysis only
 
 **Module import errors**
@@ -454,7 +454,7 @@ pip install -r requirements.txt  # if requirements.txt exists
 ### Getting Help
 
 - **Issues**: [GitHub Issues](https://github.com/sturrent/aks-net-diagnostics/issues)
-- **Verbose Mode**: Always use `--verbose` when reporting issues
+- **Detailed Mode**: Always use `--details` when reporting issues
 - **JSON Export**: Attach JSON report (`--json-report`) for detailed diagnostics
 
 ## License

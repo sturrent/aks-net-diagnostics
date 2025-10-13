@@ -70,7 +70,7 @@ class AKSNetworkDiagnostics:
         self.probe_test: bool = False
         self.json_out: Optional[str] = None
         self.no_json: bool = False
-        self.verbose: bool = False
+        self.show_details: bool = False
         self.cache: bool = False
         
         # Cache for Azure CLI responses
@@ -139,7 +139,7 @@ EXAMPLES:
   %(prog)s -n my-aks-cluster -g my-resource-group
   %(prog)s -n my-cluster -g my-rg --subscription 12345678-1234-1234-1234-123456789012
   %(prog)s -n my-cluster -g my-rg --probe-test --json-report custom-report.json
-  %(prog)s -n my-cluster -g my-rg --verbose --json-report
+  %(prog)s -n my-cluster -g my-rg --details --json-report
             """
         )
         
@@ -159,7 +159,7 @@ EXAMPLES:
                           help='Enable active connectivity checks from VMSS instances (WARNING: Executes commands inside cluster nodes)')
         parser.add_argument('--json-report', nargs='?', const='auto', metavar='FILENAME',
                           help='Save JSON report to file (optional: specify filename, default: auto-generated)')
-        parser.add_argument('--verbose', action='store_true',
+        parser.add_argument('--details', action='store_true',
                           help='Show detailed console output (default: summary only)')
         parser.add_argument('--cache', action='store_true',
                           help='Cache Azure CLI responses for faster re-runs')
@@ -178,7 +178,7 @@ EXAMPLES:
             
         self.probe_test = args.probe_test
         self.json_report = args.json_report
-        self.verbose = args.verbose
+        self.show_details = args.details
         self.cache = args.cache
         
         # Initialize modular components
@@ -251,7 +251,7 @@ EXAMPLES:
             logger=self.logger
         )
         
-        self.outbound_analysis = analyzer.analyze(verbose=self.verbose)
+        self.outbound_analysis = analyzer.analyze(show_details=self.show_details)
         self.outbound_ips = analyzer.get_outbound_ips()
     
     
@@ -363,7 +363,7 @@ EXAMPLES:
     
     def check_api_connectivity(self):
         """Check API server connectivity using ConnectivityTester module"""
-        tester = ConnectivityTester(self.cluster_info, self.azure_cli_executor, self.dns_analyzer, verbose=self.verbose)
+        tester = ConnectivityTester(self.cluster_info, self.azure_cli_executor, self.dns_analyzer, show_details=self.show_details)
         self.api_probe_results = tester.test_connectivity(enable_probes=self.probe_test)
     
     def analyze_misconfigurations(self):
@@ -411,7 +411,7 @@ EXAMPLES:
         )
         
         # Print console report
-        report_gen.print_console_report(verbose=self.verbose, json_report_path=self.json_report)
+        report_gen.print_console_report(show_details=self.show_details, json_report_path=self.json_report)
         
         # Save JSON report if requested
         if self.json_report:
@@ -457,7 +457,7 @@ def main():
         exit_code = 4
     except Exception as e:
         print(f"\nUnexpected Error: {e}")
-        # In verbose mode or debug, show stack trace
+        # In details mode or debug, show stack trace
         import traceback
         traceback.print_exc()
         exit_code = 1

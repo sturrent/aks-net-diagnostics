@@ -193,7 +193,7 @@ class DNSAnalyzer:
                     hasAzureDns=has_azure_dns,
                     privateDnsZone=self.dns_analysis.get('privateDnsZone')
                 ))
-                self.logger.warning(f"  CRITICAL: Custom DNS servers may prevent private DNS resolution")
+                self.logger.warning(f"  [X] Custom DNS servers may prevent private DNS resolution")
             
             elif non_azure_dns and not is_private_cluster:
                 # Public cluster with custom DNS - medium risk (CoreDNS may have issues)
@@ -214,7 +214,7 @@ class DNSAnalyzer:
                     customDnsServers=non_azure_dns,
                     hasAzureDns=has_azure_dns
                 ))
-                self.logger.warning(f"  WARNING: Custom DNS may impact CoreDNS and Azure service resolution")
+                self.logger.warning(f"  [!] Custom DNS may impact CoreDNS and Azure service resolution")
             
             elif has_azure_dns and len(dns_servers) > 1:
                 # Mix of Azure DNS and custom DNS - informational

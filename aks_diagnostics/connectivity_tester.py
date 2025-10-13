@@ -29,7 +29,7 @@ class VMSSInstance:
 class ConnectivityTester:
     """Manages connectivity testing from AKS VMSS instances"""
     
-    def __init__(self, cluster_info: Dict[str, Any], azure_cli_executor, dns_analyzer=None, verbose: bool = False):
+    def __init__(self, cluster_info: Dict[str, Any], azure_cli_executor, dns_analyzer=None, show_details: bool = False):
         """
         Initialize Connectivity Tester
         
@@ -37,12 +37,12 @@ class ConnectivityTester:
             cluster_info: AKS cluster information dictionary
             azure_cli_executor: AzureCLIExecutor instance for executing Azure CLI commands
             dns_analyzer: Optional DNS analyzer for private DNS validation
-            verbose: Whether to show detailed test output
+            show_details: Whether to show detailed test output
         """
         self.cluster_info = cluster_info
         self.azure_cli_executor = azure_cli_executor
         self.dns_analyzer = dns_analyzer
-        self.verbose = verbose
+        self.show_details = show_details
         self.logger = logging.getLogger("aks_net_diagnostics.connectivity_tester")
         
         self.probe_results = {
@@ -275,9 +275,9 @@ class ConnectivityTester:
                 if "DNS" in test_name:
                     self.logger.warning(f"    {test_name} failed - dependent connectivity tests will be skipped")
             
-            # Log test results based on verbosity
-            # In verbose mode, show full JSON with compacted output
-            if self.verbose:
+            # Log test results based on detail level
+            # In detailed mode, show full JSON with compacted output
+            if self.show_details:
                 # Create a copy of result with compacted stdout/stderr for logging
                 log_result = result.copy()
                 if log_result.get('stdout'):
@@ -286,7 +286,7 @@ class ConnectivityTester:
                     log_result['stderr'] = log_result['stderr'].replace('\n', '\\n')
                 self.logger.info(f"    Test result: {json.dumps(log_result, indent=2)}")
             else:
-                # In non-verbose mode, just show summary
+                # In summary mode, just show summary
                 status = result['status'].upper()
                 self.logger.info(f"    Result: {status} - {result['analysis']}")
             

@@ -311,7 +311,7 @@ What actually happened.
 - Azure CLI version: [e.g., 2.50.0]
 
 **Additional context**
-- Verbose output (if applicable)
+- Detailed output (if applicable)
 - JSON report (if applicable)
 ```
 
