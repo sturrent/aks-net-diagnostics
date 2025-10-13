@@ -5,6 +5,37 @@ All notable changes to the AKS Network Diagnostics tool will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2025-10-13
+
+### Changed
+
+#### Breaking Changes
+- **Renamed command-line flag**: Changed `--verbose` to `--details` for better clarity and consistency
+- **IMPORTANT**: Scripts or automation using `--verbose` must be updated to use `--details`
+
+#### Internal Improvements
+- **Refactored internal APIs**: Function parameters renamed from `verbose` to `show_details` for consistency
+- **Method naming**: Updated method names (`_print_verbose_report` → `_print_detailed_report`)
+- **Code clarity**: Improved comments and variable names throughout codebase
+
+#### Output Format Standardization
+- **Consistent severity symbols**: Standardized all output to use uniform symbols:
+  - `[X]` for Critical/Error issues
+  - `[!]` for Warning issues
+  - `[i]` for Informational findings
+  - `[OK]` for Allow rules in NSG analysis
+- **Fixed inconsistencies**: Corrected symbol usage in findings logs, NSG rule display, findings summary, and analyzer warnings
+
+#### Documentation
+- **Updated all examples**: README.md, CHANGELOG.md, and other documentation now use `--details` flag
+- **Consistent terminology**: Changed references from "verbose mode" to "detailed mode" or "summary mode"
+
+### Technical Details
+- Modified files: 11 (7 Python modules, 4 documentation files)
+- All 147 unit tests pass
+- Tested on multiple real AKS clusters
+- No functional logic changes, only naming and output format improvements
+
 ## [1.0.1] - 2025-10-03
 
 ### Changed

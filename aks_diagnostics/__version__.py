@@ -10,6 +10,6 @@ This follows the standard convention where:
 - Python code uses semantic version without prefix (1.0.0, 2.1.0)
 """
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 __author__ = "Azure Networking Diagnostics Generator"
 __description__ = "Comprehensive read-only analysis of AKS cluster network configuration"
