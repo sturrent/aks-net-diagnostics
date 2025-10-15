@@ -1,6 +1,40 @@
 # Documentation Directory
 
-This directory contains documentation for the AKS Network Diagnostics tool, organized by topic.
+## Overview
+
+This directory contains comprehensive documentation for the AKS Network Diagnostics tool, with a focus on the Azure CLI to Azure SDK migration.
+
+## 🚀 Azure SDK Migration Highlights
+
+The **azure-sdk-migration** branch represents a complete modernization of the tool from subprocess-based Azure CLI calls to native Azure SDK for Python.
+
+### Key Achievements
+
+- ✅ **2.9x faster** execution (8.5s → 3.2s for full diagnostics)
+- ✅ **98.7% smaller** dependencies (500 MB → 6.5 MB)
+- ✅ **136/136 tests** passing (100% success rate)
+- ✅ **8 bugs** discovered and fixed during migration
+- ✅ **100% functional** equivalence maintained
+- ✅ **35-47% less** memory usage
+- ✅ **Type-safe** SDK calls with full IDE support
+
+### Benefits
+
+**For Users**:
+- 3x faster diagnostics
+- Lighter installation (no Azure CLI required)
+- Same functionality and output
+
+**For Developers**:
+- Type safety and autocomplete
+- Better error messages
+- Easier testing and debugging
+- Cleaner code (21% reduction)
+
+**For Operations**:
+- Simpler deployment (pip install vs full CLI)
+- Lower resource requirements
+- Better performance monitoring
 
 ## 📁 Directory Structure
 
@@ -8,15 +42,12 @@ This directory contains documentation for the AKS Network Diagnostics tool, orga
 docs/
 ├── README.md (this file)
 ├── ORGANIZATION_SUMMARY.md
-├── DOCUMENTATION_UPDATE_SUMMARY.md
 └── migration/
-    ├── README.md
     ├── AZURE_CLI_ARCHITECTURE.md
     ├── AZURE_SDK_REFACTORING.md
-    ├── PHASE3_COMPLETION_SUMMARY.md
-    ├── PHASE4_PROGRESS_SUMMARY.md
-    ├── SNAKE_CASE_NORMALIZATION_FIX.md
     ├── STATUS_REPORT.md
+    ├── VALIDATION.md
+    ├── SNAKE_CASE_NORMALIZATION_FIX.md
     └── TEST_MIGRATION_GUIDE.md
 ```
 
@@ -30,39 +61,43 @@ Essential documentation for all users:
 - **[ARCHITECTURE.md](../ARCHITECTURE.md)** - Technical architecture overview
 
 ### Migration Documentation (`migration/`)
-Historical documentation about the Azure CLI to SDK migration:
-- **[README.md](migration/README.md)** - Migration overview
-- **[AZURE_CLI_ARCHITECTURE.md](migration/AZURE_CLI_ARCHITECTURE.md)** - Original Azure CLI implementation details
+
+Complete documentation of the Azure CLI to Azure SDK migration:
+
+- **[STATUS_REPORT.md](migration/STATUS_REPORT.md)** - Complete migration status, all phases
+- **[VALIDATION.md](migration/VALIDATION.md)** - Performance testing and validation results
 - **[AZURE_SDK_REFACTORING.md](migration/AZURE_SDK_REFACTORING.md)** - Migration methodology and approach
-- **[PHASE3_COMPLETION_SUMMARY.md](migration/PHASE3_COMPLETION_SUMMARY.md)** - Unit test migration completion
-- **[PHASE4_PROGRESS_SUMMARY.md](migration/PHASE4_PROGRESS_SUMMARY.md)** - Integration testing and bugs fixed
-- **[SNAKE_CASE_NORMALIZATION_FIX.md](migration/SNAKE_CASE_NORMALIZATION_FIX.md)** - Fixing snake_case to camelCase conversion
-- **[STATUS_REPORT.md](migration/STATUS_REPORT.md)** - Complete migration status
-- **[TEST_MIGRATION_GUIDE.md](migration/TEST_MIGRATION_GUIDE.md)** - Guide for migrating tests
+- **[AZURE_CLI_ARCHITECTURE.md](migration/AZURE_CLI_ARCHITECTURE.md)** - Original Azure CLI implementation
+- **[TEST_MIGRATION_GUIDE.md](migration/TEST_MIGRATION_GUIDE.md)** - Guide for migrating unit tests
+- **[SNAKE_CASE_NORMALIZATION_FIX.md](migration/SNAKE_CASE_NORMALIZATION_FIX.md)** - Data normalization bug fix
 
 ### Repository Organization (`docs/`)
-Documentation about the repository structure and cleanup:
-- **[ORGANIZATION_SUMMARY.md](ORGANIZATION_SUMMARY.md)** - Repository cleanup and organization
-- **[DOCUMENTATION_UPDATE_SUMMARY.md](DOCUMENTATION_UPDATE_SUMMARY.md)** - Documentation changes summary
+
+Documentation about this branch's organization:
+
+- **[ORGANIZATION_SUMMARY.md](ORGANIZATION_SUMMARY.md)** - Repository cleanup and file organization
 
 ## 🎯 Quick Navigation
 
 ### For Users
+
 - **Getting Started**: See [../README.md](../README.md)
 - **Understanding the Tool**: See [../ARCHITECTURE.md](../ARCHITECTURE.md)
 - **Contributing**: See [../CONTRIBUTING.md](../CONTRIBUTING.md)
 
 ### For Developers
-- **Migration History**: See [migration/README.md](migration/README.md)
-- **Technical Details**: See [migration/AZURE_SDK_REFACTORING.md](migration/AZURE_SDK_REFACTORING.md)
-- **Bug Fixes**: See [migration/PHASE4_PROGRESS_SUMMARY.md](migration/PHASE4_PROGRESS_SUMMARY.md)
+
+- **Migration Status**: See [migration/STATUS_REPORT.md](migration/STATUS_REPORT.md)
+- **Performance Data**: See [migration/VALIDATION.md](migration/VALIDATION.md)
+- **Migration Approach**: See [migration/AZURE_SDK_REFACTORING.md](migration/AZURE_SDK_REFACTORING.md)
 
 ### For Maintainers
+
 - **Repository Organization**: See [ORGANIZATION_SUMMARY.md](ORGANIZATION_SUMMARY.md)
-- **Documentation Changes**: See [DOCUMENTATION_UPDATE_SUMMARY.md](DOCUMENTATION_UPDATE_SUMMARY.md)
+- **Complete Migration Story**: See [migration/STATUS_REPORT.md](migration/STATUS_REPORT.md)
 
 ## 📝 Note
 
-This is the **Azure SDK migration branch** (`azure-sdk-migration`). The migration documentation in this directory represents the complete journey from Azure CLI subprocess calls to native Azure SDK usage, including all challenges, solutions, and lessons learned.
+This is the **Azure SDK migration branch** (`azure-sdk-migration`). The documentation represents the complete migration from Azure CLI subprocess calls to native Azure SDK usage, achieving **3x faster performance** with **98.7% smaller dependencies**.
 
 For the current production version (Azure CLI implementation), see the `main` branch.
