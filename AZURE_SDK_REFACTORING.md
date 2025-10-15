@@ -8,6 +8,15 @@ This document outlines the plan to refactor the AKS Network Diagnostics tool fro
 
 **Target Command:** `az aks net-diagnostics`
 
+### Key Discovery
+
+After reviewing the Azure CLI source code (see `AZURE_CLI_ARCHITECTURE.md`), we confirmed that:
+- ✅ **Azure CLI uses Azure SDK for Python directly** - No subprocess calls internally
+- ✅ **Our refactoring approach is validated** - We're following the exact pattern Azure CLI uses
+- ✅ **Simpler than expected** - Azure CLI uses thin wrappers around SDK clients, not complex abstractions
+
+**Design Principle:** Keep it simple - follow Azure CLI's client factory pattern with minimal abstraction.
+
 ---
 
 ## Current Architecture
@@ -400,9 +409,12 @@ vnets = list(network_client.virtual_networks.list_all())
 
 **New File:** `aks_diagnostics/azure_sdk_client.py`
 
+**Design Philosophy:** Follow Azure CLI's pattern - keep it simple with thin wrappers around SDK clients. Don't over-engineer.
+
 ```python
 """
 Azure SDK client wrapper for AKS Network Diagnostics
+Follows Azure CLI's client factory pattern for simplicity
 """
 
 from typing import Any, Dict, List, Optional
@@ -411,31 +423,84 @@ from azure.mgmt.containerservice import ContainerServiceClient
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.privatedns import PrivateDnsManagementClient
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 from .cache import CacheManager
 
+
 class AzureSDKClient:
-    """Wrapper for Azure SDK clients with caching"""
+    """
+    Thin wrapper for Azure SDK clients with caching support.
+    
+    Pattern inspired by Azure CLI's client factory approach:
+    - Lazy initialization of SDK clients
+    - Simple property-based access
+    - Minimal abstraction over SDK
+    - Caching for performance
+    """
     
     def __init__(self, subscription_id: str, cache_manager: Optional[CacheManager] = None):
         self.subscription_id = subscription_id
         self.cache_manager = cache_manager
         self.credential = DefaultAzureCredential()
         
-        # Initialize clients
-        self.aks_client = ContainerServiceClient(self.credential, subscription_id)
-        self.network_client = NetworkManagementClient(self.credential, subscription_id)
-        self.compute_client = ComputeManagementClient(self.credential, subscription_id)
-        self.privatedns_client = PrivateDnsManagementClient(self.credential, subscription_id)
+        # Lazy initialization - only create clients when needed
+        self._aks_client = None
+        self._network_client = None
+        self._compute_client = None
+        self._privatedns_client = None
     
-    # AKS Operations
+    # Client properties with lazy initialization (Azure CLI pattern)
+    @property
+    def aks_client(self) -> ContainerServiceClient:
+        """Get or create ContainerServiceClient"""
+        if not self._aks_client:
+            self._aks_client = ContainerServiceClient(
+                self.credential, 
+                self.subscription_id
+            )
+        return self._aks_client
+    
+    @property
+    def network_client(self) -> NetworkManagementClient:
+        """Get or create NetworkManagementClient"""
+        if not self._network_client:
+            self._network_client = NetworkManagementClient(
+                self.credential,
+                self.subscription_id
+            )
+        return self._network_client
+    
+    @property
+    def compute_client(self) -> ComputeManagementClient:
+        """Get or create ComputeManagementClient"""
+        if not self._compute_client:
+            self._compute_client = ComputeManagementClient(
+                self.credential,
+                self.subscription_id
+            )
+        return self._compute_client
+    
+    @property
+    def privatedns_client(self) -> PrivateDnsManagementClient:
+        """Get or create PrivateDnsManagementClient"""
+        if not self._privatedns_client:
+            self._privatedns_client = PrivateDnsManagementClient(
+                self.credential,
+                self.subscription_id
+            )
+        return self._privatedns_client
+    
+    # Helper methods with caching (keep minimal, most code uses SDK directly)
     def get_cluster(self, resource_group: str, cluster_name: str) -> Any:
-        """Get AKS cluster details"""
-        cache_key = f"cluster:{resource_group}:{cluster_name}"
-        if self.cache_manager:
-            cached = self.cache_manager.get(cache_key)
-            if cached:
-                return cached
+        """
+        Get AKS cluster details with caching.
+        Equivalent to: az aks show -g {rg} -n {name}
+        """
+        cache_key = f"cluster_{resource_group}_{cluster_name}"
+        if self.cache_manager and self.cache_manager.has(cache_key):
+            return self.cache_manager.get(cache_key)
         
+        # Direct SDK call - no additional abstraction
         cluster = self.aks_client.managed_clusters.get(resource_group, cluster_name)
         
         if self.cache_manager:
@@ -443,18 +508,17 @@ class AzureSDKClient:
         
         return cluster
     
-    def list_agent_pools(self, resource_group: str, cluster_name: str) -> List[Any]:
-        """List AKS agent pools"""
-        # Implementation here
-        pass
-    
-    # Network Operations
-    def get_vnet(self, resource_group: str, vnet_name: str) -> Any:
-        """Get virtual network details"""
-        pass
-    
-    # ... more methods ...
+    # Most operations will directly use the client properties
+    # Example: self.sdk_client.network_client.virtual_networks.get(rg, vnet)
+    # No need to wrap every SDK call - that's the Azure CLI pattern!
 ```
+
+**Key Principles:**
+1. **Thin wrapper** - Most code will call SDK clients directly via properties
+2. **Lazy initialization** - Create clients only when needed
+3. **Selective helpers** - Only add helper methods for frequently used operations with caching
+4. **Direct SDK access** - Expose SDK clients for all other operations
+5. **Simple is better** - Don't create an abstraction layer over the entire SDK
 
 ### Phase 2: Update Data Collectors
 
