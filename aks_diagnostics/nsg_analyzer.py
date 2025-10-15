@@ -3,9 +3,12 @@ NSG Analyzer for AKS Network Diagnostics
 
 This module analyzes Network Security Groups (NSGs) associated with AKS clusters,
 checking for misconfigurations, blocking rules, and compliance with AKS requirements.
+
+Migrated from Azure CLI subprocess to Azure SDK for Python.
 """
 
 from typing import Dict, List, Optional, Any, Set
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 from .base_analyzer import BaseAnalyzer
 from .models import Finding, FindingCode, Severity
 from .exceptions import AzureCLIError
@@ -14,16 +17,16 @@ from .exceptions import AzureCLIError
 class NSGAnalyzer(BaseAnalyzer):
     """Analyzes Network Security Group configurations for AKS clusters."""
     
-    def __init__(self, azure_cli, cluster_info: Dict[str, Any], vmss_info: List[Dict[str, Any]]):
+    def __init__(self, azure_sdk_client, cluster_info: Dict[str, Any], vmss_info: List[Dict[str, Any]]):
         """
         Initialize NSG Analyzer.
         
         Args:
-            azure_cli: AzureCLIExecutor instance
+            azure_sdk_client: AzureSDKClient instance
             cluster_info: AKS cluster information
             vmss_info: VMSS information from VMSS analyzer
         """
-        super().__init__(azure_cli, cluster_info)
+        super().__init__(azure_sdk_client, cluster_info)
         self.vmss_info = vmss_info
         self.nsg_analysis = {
             "subnetNsgs": [],
@@ -162,41 +165,54 @@ class NSGAnalyzer(BaseAnalyzer):
                     
                     processed_subnets.add(subnet_id)
                     
-                    # Get subnet information
+                    # Get subnet information using SDK (replaces: az network vnet subnet show --ids)
                     try:
-                        subnet_info = self.azure_cli.execute(
-                            ['network', 'vnet', 'subnet', 'show', '--ids', subnet_id]
+                        # Parse subnet ID to get components
+                        parsed = self.sdk_client.parse_resource_id(subnet_id)
+                        subnet_rg = parsed['resource_group']
+                        vnet_name = parsed['parent_name']  # VNet is parent of subnet
+                        subnet_name = parsed['resource_name']
+                        
+                        # Get subnet info using SDK
+                        subnet_info = self.sdk_client.network_client.subnets.get(
+                            subnet_rg, vnet_name, subnet_name
                         )
                         
-                        if not subnet_info or not isinstance(subnet_info, dict):
-                            continue
-                        
-                        nsg_info = subnet_info.get('networkSecurityGroup')
+                        nsg_info = subnet_info.network_security_group
                         if nsg_info:
-                            nsg_id = nsg_info.get('id')
+                            nsg_id = nsg_info.id
                             nsg_name = nsg_id.split('/')[-1] if nsg_id else 'unknown'
                             
-                            # Get NSG details
-                            nsg_details = self.azure_cli.execute(
-                                ['network', 'nsg', 'show', '--ids', nsg_id]
+                            # Parse NSG ID to get resource group
+                            nsg_parsed = self.sdk_client.parse_resource_id(nsg_id)
+                            nsg_rg = nsg_parsed['resource_group']
+                            
+                            # Get NSG details using SDK (replaces: az network nsg show --ids)
+                            nsg_details = self.sdk_client.network_client.network_security_groups.get(
+                                nsg_rg, nsg_name
                             )
                             
-                            if nsg_details and isinstance(nsg_details, dict):
+                            if nsg_details:
+                                # Convert to dictionary for compatibility
+                                nsg_dict = nsg_details.as_dict()
+                                
                                 self.nsg_analysis["subnetNsgs"].append({
                                     "subnetId": subnet_id,
-                                    "subnetName": subnet_info.get('name', 'unknown'),
+                                    "subnetName": subnet_info.name,
                                     "nsgId": nsg_id,
                                     "nsgName": nsg_name,
-                                    "rules": nsg_details.get('securityRules', []),
-                                    "defaultRules": nsg_details.get('defaultSecurityRules', [])
+                                    "rules": nsg_dict.get('securityRules', []),
+                                    "defaultRules": nsg_dict.get('defaultSecurityRules', [])
                                 })
                                 
-                                self.logger.info(f"  Found NSG on subnet {subnet_info.get('name')}: {nsg_name}")
+                                self.logger.info(f"  Found NSG on subnet {subnet_info.name}: {nsg_name}")
                         else:
-                            self.logger.info(f"  No NSG found on subnet {subnet_info.get('name')}")
+                            self.logger.info(f"  No NSG found on subnet {subnet_info.name}")
                     
-                    except AzureCLIError as e:
+                    except (ResourceNotFoundError, HttpResponseError) as e:
                         self.logger.error(f"  Failed to analyze subnet {subnet_id}: {e}")
+                    except Exception as e:
+                        self.logger.error(f"  Error parsing subnet ID {subnet_id}: {e}")
     
     def _analyze_nic_nsgs(self) -> None:
         """Analyze NSGs associated with node NICs."""
@@ -216,18 +232,25 @@ class NSGAnalyzer(BaseAnalyzer):
                     nsg_name = nsg_id.split('/')[-1] if nsg_id else 'unknown'
                     
                     try:
-                        # Get NSG details
-                        nsg_details = self.azure_cli.execute(
-                            ['network', 'nsg', 'show', '--ids', nsg_id]
+                        # Parse NSG ID to get resource group
+                        nsg_parsed = self.sdk_client.parse_resource_id(nsg_id)
+                        nsg_rg = nsg_parsed['resource_group']
+                        
+                        # Get NSG details using SDK (replaces: az network nsg show --ids)
+                        nsg_details = self.sdk_client.network_client.network_security_groups.get(
+                            nsg_rg, nsg_name
                         )
                         
-                        if nsg_details and isinstance(nsg_details, dict):
+                        if nsg_details:
+                            # Convert to dictionary for compatibility
+                            nsg_dict = nsg_details.as_dict()
+                            
                             self.nsg_analysis["nicNsgs"].append({
                                 "vmssName": vmss_name,
                                 "nicName": nic_config.get('name', 'unknown'),
                                 "nsgId": nsg_id,
                                 "nsgName": nsg_name,
-                                "rules": nsg_details.get('securityRules', []),
+                                "rules": nsg_dict.get('securityRules', []),
                                 "defaultRules": nsg_details.get('defaultSecurityRules', [])
                             })
                             

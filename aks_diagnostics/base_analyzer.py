@@ -1,26 +1,27 @@
 """
 Base class for analyzers
+
+Migrated from Azure CLI subprocess to Azure SDK for Python.
 """
 
 import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
-from .azure_cli import AzureCLIExecutor
 from .models import Finding
 
 
 class BaseAnalyzer(ABC):
     """Base class for all analyzers"""
     
-    def __init__(self, azure_cli: AzureCLIExecutor, cluster_info: Dict[str, Any]):
+    def __init__(self, azure_sdk_client, cluster_info: Dict[str, Any]):
         """
         Initialize analyzer
         
         Args:
-            azure_cli: Azure CLI executor instance
+            azure_sdk_client: Azure SDK client instance
             cluster_info: AKS cluster information
         """
-        self.azure_cli = azure_cli
+        self.sdk_client = azure_sdk_client
         self.cluster_info = cluster_info
         self.logger = logging.getLogger(f"aks_net_diagnostics.{self.__class__.__name__}")
         self.findings: List[Finding] = []
