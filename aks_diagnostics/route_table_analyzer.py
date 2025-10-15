@@ -11,10 +11,13 @@ Key Features:
 - Categorizes routes by type (default routes, virtual appliance, Azure services, etc.)
 - Detects common issues like blackhole routes, Azure service blocking, MCR access issues
 - Supports multiple agent pools with different subnet configurations
+
+Migrated from Azure CLI subprocess to Azure SDK for Python.
 """
 
 from typing import Dict, List, Any, Optional, Set
 import logging
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 
 
 class RouteTableAnalyzer:
@@ -25,16 +28,16 @@ class RouteTableAnalyzer:
     potential connectivity issues and assess the impact of routes on cluster operations.
     """
     
-    def __init__(self, agent_pools: List[Dict[str, Any]], azure_cli):
+    def __init__(self, agent_pools: List[Dict[str, Any]], azure_sdk_client):
         """
         Initialize the RouteTableAnalyzer.
         
         Args:
             agent_pools: List of AKS agent pool configurations
-            azure_cli: AzureCLIExecutor instance for making Azure CLI calls
+            azure_sdk_client: AzureSDKClient instance for SDK operations
         """
         self.agent_pools = agent_pools
-        self.azure_cli = azure_cli
+        self.sdk_client = azure_sdk_client
         self.logger = logging.getLogger("aks_net_diagnostics.route_table_analyzer")
     
     def analyze(self) -> Dict[str, Any]:
@@ -119,27 +122,34 @@ class RouteTableAnalyzer:
             Subnet details dictionary or None if error occurs
         """
         try:
-            # Parse subnet ID to extract components
-            parts = subnet_id.split('/')
-            if len(parts) < 11:
-                return None
+            # Parse subnet ID to extract components using SDK helper
+            parsed = self.sdk_client.parse_resource_id(subnet_id)
+            subscription_id = parsed['subscription_id']
+            resource_group = parsed['resource_group']
+            vnet_name = parsed['parent_name']  # VNet is parent of subnet
+            subnet_name = parsed['resource_name']
             
-            subscription_id = parts[2]
-            resource_group = parts[4]
-            vnet_name = parts[8]
-            subnet_name = parts[10]
+            # Create network client for the subnet's subscription if different
+            if subscription_id != self.sdk_client.subscription_id:
+                from azure.mgmt.network import NetworkManagementClient
+                network_client = NetworkManagementClient(
+                    self.sdk_client.credential,
+                    subscription_id
+                )
+            else:
+                network_client = self.sdk_client.network_client
             
-            # Get subnet details
-            cmd = ['network', 'vnet', 'subnet', 'show', 
-                   '--subscription', subscription_id,
-                   '-g', resource_group, 
-                   '--vnet-name', vnet_name, 
-                   '-n', subnet_name]
+            # Get subnet details using SDK (replaces: az network vnet subnet show)
+            subnet = network_client.subnets.get(resource_group, vnet_name, subnet_name)
             
-            return self.azure_cli.execute(cmd)
+            # Convert to dictionary for compatibility
+            return subnet.as_dict()
             
-        except Exception as e:
+        except (ResourceNotFoundError, HttpResponseError) as e:
             self.logger.info(f"    Error getting subnet details for {subnet_id}: {e}")
+            return None
+        except Exception as e:
+            self.logger.info(f"    Error parsing subnet ID {subnet_id}: {e}")
             return None
     
     def _analyze_route_table(self, route_table_id: str, subnet_id: str) -> Optional[Dict[str, Any]]:
@@ -154,22 +164,27 @@ class RouteTableAnalyzer:
             Route table analysis dictionary or None if error occurs
         """
         try:
-            # Parse route table ID
-            parts = route_table_id.split('/')
-            if len(parts) < 9:
-                return None
+            # Parse route table ID using SDK helper
+            parsed = self.sdk_client.parse_resource_id(route_table_id)
+            subscription_id = parsed['subscription_id']
+            resource_group = parsed['resource_group']
+            route_table_name = parsed['resource_name']
             
-            subscription_id = parts[2]
-            resource_group = parts[4]
-            route_table_name = parts[8]
+            # Create network client for the route table's subscription if different
+            if subscription_id != self.sdk_client.subscription_id:
+                from azure.mgmt.network import NetworkManagementClient
+                network_client = NetworkManagementClient(
+                    self.sdk_client.credential,
+                    subscription_id
+                )
+            else:
+                network_client = self.sdk_client.network_client
             
-            # Get route table details
-            cmd = ['network', 'route-table', 'show',
-                   '--subscription', subscription_id,
-                   '-g', resource_group,
-                   '-n', route_table_name]
+            # Get route table details using SDK (replaces: az network route-table show)
+            route_table = network_client.route_tables.get(resource_group, route_table_name)
             
-            route_table_info = self.azure_cli.execute(cmd)
+            # Convert to dictionary for compatibility
+            route_table_info = route_table.as_dict()
             
             if not route_table_info:
                 return None
