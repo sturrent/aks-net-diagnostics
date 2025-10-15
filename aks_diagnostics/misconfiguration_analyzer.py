@@ -127,11 +127,12 @@ class MisconfigurationAnalyzer:
                     "recommendation": "Check Azure Activity Log for detailed failure information and contact Azure support if needed"
                 })
             else:
+                # No detailed error available - indicate this clearly instead of showing fake/generic error
                 findings.append({
                     "severity": "critical",
                     "code": "CLUSTER_OPERATION_FAILURE",
-                    "message": "Cluster failed with error: Failed (Operation: Microsoft.ContainerService/managedClusters/stop/action)",
-                    "recommendation": "Check Azure Activity Log for detailed failure information and contact Azure support if needed"
+                    "message": f"Cluster provisioning failed (state: {provisioning_state}). Detailed error information not available.",
+                    "recommendation": "Check Azure Activity Log or Azure Portal for detailed failure information. Run 'az aks show -n <cluster-name> -g <resource-group>' to see current cluster status."
                 })
     
     def _check_node_pool_states(self, cluster_info: Dict[str, Any], findings: List[Dict[str, Any]]) -> None:
