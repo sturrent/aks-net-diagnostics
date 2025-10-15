@@ -217,15 +217,8 @@ class MisconfigurationAnalyzer:
     def _check_system_private_dns_issues(self, findings: List[Dict[str, Any]]) -> None:
         """Check system-managed private DNS zone issues"""
         try:
-            # List private DNS zones using SDK (replaces: az network private-dns zone list)
-            zones_list = list(
-                self.sdk_client.privatedns_client.private_zones.list_by_resource_group(
-                    self.sdk_client.subscription_id  # Need to list all zones across subscription
-                )
-            )
-            
-            # Note: SDK list_by_resource_group requires RG, but we need all zones
-            # Use list() to get all zones in subscription
+            # List all private DNS zones in the subscription
+            # Note: Using list() to get all zones across subscription (not limited to one RG)
             zones_list = list(self.sdk_client.privatedns_client.private_zones.list())
             
             aks_private_zones = []
