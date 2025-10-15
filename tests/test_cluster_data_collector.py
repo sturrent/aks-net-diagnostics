@@ -36,6 +36,8 @@ class TestClusterDataCollector(unittest.TestCase):
             'location': 'eastus',
             'provisioningState': 'Succeeded'
         }
+        # Mock status with additional_properties
+        mock_cluster.status = None  # No status object (normal case)
         
         # Mock agent pool objects from SDK
         mock_pool1 = Mock()
@@ -83,6 +85,7 @@ class TestClusterDataCollector(unittest.TestCase):
         """Test cluster info collection when agent pools list is empty"""
         mock_cluster = Mock()
         mock_cluster.as_dict.return_value = {'name': 'test-cluster'}
+        mock_cluster.status = None  # No status object
         
         self.mock_sdk_client.get_cluster.return_value = mock_cluster
         self.mock_sdk_client.aks_client.agent_pools.list.return_value = []
@@ -299,6 +302,7 @@ class TestClusterDataCollector(unittest.TestCase):
             'name': 'test-cluster',
             'nodeResourceGroup': 'MC_test-rg'
         }
+        mock_cluster.status = None  # No status object
         
         # Mock agent pool objects
         mock_pool = Mock()
