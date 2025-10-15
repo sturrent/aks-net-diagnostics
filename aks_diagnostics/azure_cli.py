@@ -9,27 +9,20 @@ import os
 from typing import Any, List, Optional
 from .exceptions import AzureCLIError, AzureAuthenticationError
 from .validators import InputValidator
-from .cache import CacheManager
 
 # Platform detection for subprocess shell parameter
 IS_WINDOWS = os.name == 'nt'
 
 
 class AzureCLIExecutor:
-    """Executes Azure CLI commands with caching and error handling"""
+    """Executes Azure CLI commands with error handling"""
     
     # Configuration constants
     AZURE_CLI_TIMEOUT = 90
     
-    def __init__(self, cache_manager: Optional[CacheManager] = None):
-        """
-        Initialize Azure CLI executor
-        
-        Args:
-            cache_manager: Optional cache manager for caching responses
-        """
+    def __init__(self):
+        """Initialize Azure CLI executor"""
         self.logger = logging.getLogger("aks_net_diagnostics.azure_cli")
-        self.cache_manager = cache_manager
     
     def execute(self, cmd: List[str], expect_json: bool = True, timeout: Optional[int] = None) -> Any:
         """
@@ -58,12 +51,6 @@ class AzureCLIExecutor:
         # Use custom timeout or default
         cmd_timeout = timeout if timeout is not None else self.AZURE_CLI_TIMEOUT
         
-        # Check cache first
-        if self.cache_manager:
-            cached_result = self.cache_manager.get(cmd_str)
-            if cached_result is not None:
-                return cached_result
-        
         try:
             result = subprocess.run(
                 ['az'] + cmd,
@@ -81,17 +68,12 @@ class AzureCLIExecutor:
             if expect_json:
                 try:
                     data = json.loads(output)
-                    # Cache the result
-                    if self.cache_manager:
-                        self.cache_manager.set(cmd_str, data)
                     return data
                 except json.JSONDecodeError:
                     # If JSON parsing fails, return the raw output
                     self.logger.warning(f"Failed to parse JSON from command: {cmd_str}")
                     return output
             else:
-                if self.cache_manager:
-                    self.cache_manager.set(cmd_str, output)
                 return output
             
         except subprocess.TimeoutExpired as e:

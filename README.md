@@ -159,7 +159,6 @@ For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)
 | `--probe-test` | Enable active connectivity tests from nodes | `--probe-test` |
 | `--json-report [FILE]` | Save JSON report (optional filename) | `--json-report report.json` |
 | `--subscription <ID>` | Override Azure subscription | `--subscription abc-123` |
-| `--cache` | Enable response caching (faster reruns) | `--cache` |
 
 ## Usage Examples
 

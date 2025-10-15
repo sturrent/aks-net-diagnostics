@@ -30,7 +30,6 @@ from aks_diagnostics.report_generator import ReportGenerator
 from aks_diagnostics.misconfiguration_analyzer import MisconfigurationAnalyzer
 from aks_diagnostics.cluster_data_collector import ClusterDataCollector
 from aks_diagnostics.azure_cli import AzureCLIExecutor
-from aks_diagnostics.cache import CacheManager
 from aks_diagnostics.validators import InputValidator
 from aks_diagnostics.exceptions import ValidationError
 from aks_diagnostics.__version__ import __version__
@@ -71,10 +70,6 @@ class AKSNetworkDiagnostics:
         self.json_out: Optional[str] = None
         self.no_json: bool = False
         self.show_details: bool = False
-        self.cache: bool = False
-        
-        # Cache for Azure CLI responses
-        self._cache: Dict[str, Any] = {}
         
         # Analysis results
         self.cluster_info: Dict[str, Any] = {}
@@ -93,9 +88,8 @@ class AKSNetworkDiagnostics:
         # Setup logging
         self.logger = self._setup_logging()
         
-        # Initialize modular components (will be set up after cache is enabled)
+        # Initialize modular components
         self.azure_cli_executor: Optional[AzureCLIExecutor] = None
-        self.cache_manager: Optional[CacheManager] = None
         self.dns_analyzer: Optional[DNSAnalyzer] = None
     
     def _setup_logging(self):
@@ -161,8 +155,6 @@ EXAMPLES:
                           help='Save JSON report to file (optional: specify filename, default: auto-generated)')
         parser.add_argument('--details', action='store_true',
                           help='Show detailed console output (default: summary only)')
-        parser.add_argument('--cache', action='store_true',
-                          help='Cache Azure CLI responses for faster re-runs')
         
         args = parser.parse_args()
         
@@ -179,15 +171,9 @@ EXAMPLES:
         self.probe_test = args.probe_test
         self.json_report = args.json_report
         self.show_details = args.details
-        self.cache = args.cache
         
         # Initialize modular components
-        self.cache_manager = CacheManager(
-            cache_dir=Path(".aks_cache"),
-            default_ttl=3600,
-            enabled=self.cache
-        )
-        self.azure_cli_executor = AzureCLIExecutor(cache_manager=self.cache_manager)
+        self.azure_cli_executor = AzureCLIExecutor()
         
         # Handle JSON output filename
         if self.json_report:

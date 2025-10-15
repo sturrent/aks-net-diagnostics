@@ -127,7 +127,7 @@ class MisconfigurationAnalyzer:
                 findings.append({
                     "severity": "critical",
                     "code": "CLUSTER_OPERATION_FAILURE",
-                    "message": "Cluster failed with error: Failed (Operation: Microsoft.ContainerService/managedClusters/stop/action)",
+                    "message": "Cluster provisioning failed - error details not available",
                     "recommendation": "Check Azure Activity Log for detailed failure information and contact Azure support if needed"
                 })
     

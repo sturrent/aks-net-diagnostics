@@ -26,7 +26,6 @@ graph TB
     subgraph "Data Collection Layer"
         CDC[ClusterDataCollector<br/>Data Gathering]
         AzCLI[AzureCLIExecutor<br/>Azure CLI Execution]
-        Cache[CacheManager<br/>Response Caching]
     end
     
     subgraph "Analysis Layer"
@@ -56,7 +55,6 @@ graph TB
     CDC --> AzCLI
     NSG & DNS & RT & API & CT & OB --> AzCLI
     
-    AzCLI --> Cache
     AzCLI --> Val
     
     NSG & DNS & RT & API & CT & OB --> Mod
@@ -121,28 +119,17 @@ sequenceDiagram
 **Used By**: Main orchestrator
 
 #### 2. AzureCLIExecutor
-**Purpose**: Execute Azure CLI commands with caching and error handling  
+**Purpose**: Execute Azure CLI commands with error handling  
 **Key Features**:
 - Command validation and sanitization
-- Response caching for performance
 - Configurable timeouts
 - Comprehensive error handling
 
-**Dependencies**: CacheManager  
 **Used By**: All analyzers, ClusterDataCollector
-
-#### 3. CacheManager
-**Purpose**: Cache Azure CLI responses to improve performance  
-**Key Features**:
-- In-memory caching
-- Command-based cache keys
-- Optional enable/disable
-
-**Used By**: AzureCLIExecutor
 
 ### Analysis Modules
 
-#### 4. NSGAnalyzer
+#### 3. NSGAnalyzer
 **Purpose**: Network Security Group validation and compliance checking  
 **Analyzes**:
 - Required AKS outbound rules (MCR, Azure Cloud, DNS, NTP)
@@ -156,7 +143,7 @@ sequenceDiagram
 - `NSG_BLOCKING_AKS_TRAFFIC` - Rules blocking required AKS traffic
 - `NSG_POTENTIAL_BLOCK` - Potentially problematic rules
 
-#### 5. DNSAnalyzer
+#### 4. DNSAnalyzer
 **Purpose**: DNS configuration validation for public and private clusters  
 **Analyzes**:
 - Azure default DNS vs custom DNS
@@ -169,7 +156,7 @@ sequenceDiagram
 - `PRIVATE_DNS_MISCONFIGURED` - Custom DNS can't resolve private zones
 - `PDNS_DNS_HOST_VNET_LINK_MISSING` - Missing VNet link to DNS zone
 
-#### 6. RouteTableAnalyzer
+#### 5. RouteTableAnalyzer
 **Purpose**: User Defined Route (UDR) impact assessment  
 **Analyzes**:
 - Default route (0.0.0.0/0) presence
@@ -181,7 +168,7 @@ sequenceDiagram
 - `ROUTE_DEFAULT_TO_FIREWALL` - UDR redirecting to firewall/NVA
 - `ROUTE_OUTBOUND_OVERRIDE` - Routes affecting outbound connectivity
 
-#### 7. APIServerAccessAnalyzer
+#### 6. APIServerAccessAnalyzer
 **Purpose**: API server access control validation  
 **Analyzes**:
 - Authorized IP ranges configuration
@@ -193,7 +180,7 @@ sequenceDiagram
 - `API_OUTBOUND_NOT_AUTHORIZED` - Cluster IPs not in authorized ranges
 - `API_CLIENT_NOT_AUTHORIZED` - Current client can't access API
 
-#### 8. ConnectivityTester
+#### 7. ConnectivityTester
 **Purpose**: Active connectivity testing from cluster nodes  
 **Tests**:
 - MCR DNS resolution
@@ -211,7 +198,7 @@ sequenceDiagram
 - `CONNECTIVITY_DNS_FAILURE` - DNS resolution failed
 - `CONNECTIVITY_HTTP_FAILURE` - HTTPS connectivity failed
 
-#### 9. OutboundConnectivityAnalyzer
+#### 8. OutboundConnectivityAnalyzer
 **Purpose**: Outbound configuration analysis  
 **Analyzes**:
 - Outbound type (LoadBalancer, NAT Gateway, UDR)
@@ -226,7 +213,7 @@ sequenceDiagram
 
 ### Reporting Modules
 
-#### 10. ReportGenerator
+#### 9. ReportGenerator
 **Purpose**: Format and output diagnostic reports  
 **Outputs**:
 - Console summary report
@@ -240,7 +227,7 @@ sequenceDiagram
 - NSG rule formatting
 - Test result presentation
 
-#### 11. MisconfigurationAnalyzer
+#### 10. MisconfigurationAnalyzer
 **Purpose**: Correlate findings and detect complex issues  
 **Analyzes**:
 - Cluster provisioning failures
@@ -256,7 +243,7 @@ sequenceDiagram
 
 ### Utility Modules
 
-#### 12. InputValidator
+#### 11. InputValidator
 **Purpose**: Validate and sanitize user inputs  
 **Validates**:
 - Cluster names
@@ -300,15 +287,13 @@ sequenceDiagram
 ```
 User Input → InputValidator → AKSNetworkDiagnostics.__init__
                                       ↓
-                            AzureCLIExecutor + CacheManager
+                                AzureCLIExecutor
 ```
 
 ### 2. Data Collection Phase
 
 ```
 Main Script → ClusterDataCollector → AzureCLIExecutor → Azure CLI
-                                              ↓
-                                        CacheManager
                                               ↓
                                      Cluster Info, Pools, VNets, VMSS
 ```
@@ -478,7 +463,7 @@ self.add_finding(Finding.create_warning(
 ## 🧪 Testing Strategy
 
 ### Unit Tests
-- **Coverage**: 147 tests across all modules
+- **Coverage**: 139 tests across all modules
 - **Isolation**: Each test is independent
 - **Mocking**: Azure CLI calls are mocked
 - **Validation**: Test both success and failure scenarios
@@ -487,7 +472,6 @@ self.add_finding(Finding.create_warning(
 ```
 tests/
 ├── test_api_server_analyzer.py    (22 tests)
-├── test_cache.py                  (8 tests)
 ├── test_cluster_data_collector.py (14 tests)
 ├── test_connectivity_tester.py    (21 tests)
 ├── test_dns_analyzer.py           (18 tests)
@@ -513,21 +497,13 @@ def test_component_when_condition_then_result(self):
 
 ## Performance Considerations
 
-### Caching Strategy
-- **Command-based**: Cache keyed by Azure CLI command
-- **Optional**: Enable with `--cache` flag
-- **In-memory**: Fast access, no disk I/O
-- **Scope**: Per-session only
-
 ### Optimization Opportunities
 1. **Parallel Queries**: VNet, VMSS, NSG queries could run in parallel
-2. **Smart Caching**: Cache VNet info across multiple cluster analyses
-3. **Incremental Analysis**: Skip unchanged components on re-run
-4. **Streaming Output**: Start showing results before full analysis complete
+2. **Incremental Analysis**: Skip unchanged components on re-run
+3. **Streaming Output**: Start showing results before full analysis complete
 
 ### Current Performance
 - **Typical Run**: 30-60 seconds for full analysis
-- **With Cache**: 15-30 seconds on subsequent runs
 - **With --probe-test**: +30-60 seconds for active tests
 
 ## 🔐 Security Considerations
@@ -579,7 +555,6 @@ graph TB
         subgraph "aks_diagnostics/"
             CDC[cluster_data_collector.py]
             AzCLI[azure_cli.py]
-            Cache[cache.py]
             NSG[nsg_analyzer.py]
             DNS[dns_analyzer.py]
             RT[route_table_analyzer.py]
@@ -598,7 +573,7 @@ graph TB
     Main --> CDC & NSG & DNS & RT & API & CT & OB & MA & RG
     CDC --> AzCLI
     NSG & DNS & RT & API & CT & OB --> AzCLI
-    AzCLI --> Cache & Val
+    AzCLI --> Val
     
     style Main fill:#e1f5ff
 ```
@@ -655,7 +630,7 @@ The `build_zipapp.py` script:
 ### Maintainability
 - **Main Script**: 451 lines (focused on orchestration)
 - **Average Module**: ~300 lines (single responsibility)
-- **Test Coverage**: 147 tests
+- **Test Coverage**: 139 tests
 - **Type Coverage**: 100% (all functions have type hints)
 
 ### Code Organization

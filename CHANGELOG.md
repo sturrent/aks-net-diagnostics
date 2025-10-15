@@ -5,6 +5,26 @@ All notable changes to the AKS Network Diagnostics tool will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2025-10-15
+
+### Removed
+- **Cache feature**: Removed development-only `--cache` flag and all caching functionality
+  - Deleted `aks_diagnostics/cache.py` module (184 lines)
+  - Deleted `tests/test_cache.py` test file (139 lines, 8 tests)
+  - Removed cache references from main script and Azure CLI executor
+  - Updated documentation to remove all cache references
+  - **Rationale**: Cache was a development-only feature that could confuse end users expecting fresh diagnostic data
+
+### Fixed
+- **Honest error reporting**: Fixed fabricated cluster status error message
+  - Changed misleading generic error to honest "error details not available" message
+  - Tool now shows actual Azure error messages when available
+  - **Impact**: Users get accurate error information for troubleshooting
+
+### Changed
+- **Test suite**: Reduced from 147 to 139 tests after cache removal (-8 cache tests)
+- **Documentation**: Updated README.md and ARCHITECTURE.md to reflect simplified codebase
+
 ## [1.1.0] - 2025-10-13
 
 ### Changed
