@@ -2,9 +2,12 @@
 
 A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network configurations and diagnosing connectivity issues. Features a modular architecture with specialized analyzers for deep network troubleshooting.
 
+**Version**: 2.0.0 (Azure SDK)
+
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
-[![Azure CLI 2.0+](https://img.shields.io/badge/Azure%20CLI-2.0+-blue.svg)](https://docs.microsoft.com/en-us/cli/azure/)
-[![Tests](https://img.shields.io/badge/tests-147%20passing-success.svg)](tests/)
+[![Azure SDK](https://img.shields.io/badge/Azure%20SDK-latest-blue.svg)](https://azure.github.io/azure-sdk-for-python/)
+[![Tests](https://img.shields.io/badge/tests-136%20passing-success.svg)](tests/)
+[![Version](https://img.shields.io/badge/version-2.0.0-green.svg)](CHANGELOG.md)
 
 ## Key Features
 
@@ -12,7 +15,7 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 - **Active Testing**: Optional connectivity probes from cluster nodes
 - **Multiple Output Formats**: Console summary + detailed output + JSON export
 - **Security Focused**: NSG compliance, inter-node traffic validation
-- **Modular design**: 147 unit tests, modular architecture
+- **Modular design**: 136 unit tests, type-safe Azure SDK
 - **Detailed Reports**: Actionable recommendations for every finding
 
 ## Table of Contents
@@ -32,9 +35,11 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 ## Prerequisites
 
 - **Python 3.7+** - [Download](https://www.python.org/downloads/)
-- **Azure CLI 2.0+** - [Installation guide](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
-- **Azure Authentication**: Run `az login` before using the tool
+- **Azure SDK Packages** - Automatically installed via pip (see below)
+- **Azure Authentication**: Azure credentials configured (DefaultAzureCredential)
 - **Permissions**: Reader access to AKS cluster and related network resources
+
+> **Note**: This version (2.0.0) uses the **Azure SDK for Python** instead of Azure CLI. No Azure CLI installation required!
 
 ## Installation & Usage
 
@@ -67,16 +72,30 @@ chmod +x aks-net-diagnostics.pyz
 ```bash
 git clone https://github.com/sturrent/aks-net-diagnostics.git
 cd aks-net-diagnostics
+
+# Install Azure SDK dependencies
+pip install -r requirements.txt
+
+# Run the tool
 python aks-net-diagnostics.py -n myCluster -g myResourceGroup
 ```
+
+**Required Azure SDK packages:**
+- `azure-identity` - Authentication
+- `azure-mgmt-containerservice` - AKS management
+- `azure-mgmt-network` - Network resources
+- `azure-mgmt-compute` - VM/VMSS management
+- `azure-mgmt-resource` - Resource management
+- `azure-mgmt-privatedns` - Private DNS zones
 
 ### Building Your Own .pyz File
 
 To create the single-file distribution:
 
 ```bash
+pip install -r requirements.txt  # Install dependencies first
 python build_zipapp.py
-# Creates: aks-net-diagnostics.pyz
+# Creates: aks-net-diagnostics.pyz (~58 KB with Azure SDK)
 ```
 
 ## Quick Start
@@ -394,16 +413,21 @@ For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Common Issues
 
-**Azure CLI not found**
+**Azure SDK authentication errors**
 
 ```bash
-# Verify Azure CLI installation
-az --version
+# Verify Azure credentials are configured
+# Option 1: Azure CLI (recommended)
+az login
+az account show
 
-# Install if missing
-# Windows: https://aka.ms/installazurecliwindows
-# Linux: curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-# macOS: brew install azure-cli
+# Option 2: Environment variables
+export AZURE_CLIENT_ID="your-client-id"
+export AZURE_CLIENT_SECRET="your-client-secret"
+export AZURE_TENANT_ID="your-tenant-id"
+
+# Option 3: Managed Identity (when running in Azure)
+# No configuration needed - works automatically
 ```
 
 **Not logged in to Azure**
