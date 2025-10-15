@@ -54,6 +54,21 @@ class ClusterDataCollector:
             # (SDK uses snake_case, but existing code expects Azure CLI's camelCase)
             cluster_result = normalize_dict_keys(cluster.as_dict())
             
+            # CRITICAL FIX: Azure SDK's .as_dict() doesn't include additional_properties
+            # which contains error details in the status field. We need to manually extract it.
+            if hasattr(cluster, 'status') and cluster.status:
+                if hasattr(cluster.status, 'additional_properties') and cluster.status.additional_properties:
+                    # Merge additional_properties into the status dict
+                    if 'status' not in cluster_result:
+                        cluster_result['status'] = {}
+                    cluster_result['status'].update(
+                        normalize_dict_keys(cluster.status.additional_properties)
+                    )
+                if hasattr(cluster.status, 'provisioning_error') and cluster.status.provisioning_error:
+                    if 'status' not in cluster_result:
+                        cluster_result['status'] = {}
+                    cluster_result['status']['provisioningError'] = cluster.status.provisioning_error
+            
         except ResourceNotFoundError:
             raise ValueError(
                 f"Cluster '{cluster_name}' not found in resource group '{resource_group}'. "
