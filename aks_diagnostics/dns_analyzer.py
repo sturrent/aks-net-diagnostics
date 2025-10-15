@@ -111,8 +111,8 @@ class DNSAnalyzer:
     
     def _analyze_vnet_dns_servers(self) -> None:
         """Analyze VNet DNS server configuration and detect custom DNS that may impact private DNS resolution"""
-        if not self.azure_cli:
-            self.logger.debug("  No Azure CLI executor available, skipping VNet DNS analysis")
+        if not self.sdk_client:
+            self.logger.debug("  No Azure SDK client available, skipping VNet DNS analysis")
             return
         
         try:
