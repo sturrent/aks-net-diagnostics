@@ -3,7 +3,8 @@ Unit tests for ClusterDataCollector module
 """
 
 import unittest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, Mock, PropertyMock
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 from aks_diagnostics.cluster_data_collector import ClusterDataCollector
 
 
@@ -12,72 +13,66 @@ class TestClusterDataCollector(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures"""
-        self.mock_azure_cli = MagicMock()
+        self.mock_sdk_client = MagicMock()
         self.mock_logger = MagicMock()
-        self.collector = ClusterDataCollector(self.mock_azure_cli, self.mock_logger)
+        self.collector = ClusterDataCollector(self.mock_sdk_client, self.mock_logger)
     
     def test_initialization(self):
         """Test ClusterDataCollector initialization"""
-        self.assertEqual(self.collector.azure_cli, self.mock_azure_cli)
+        self.assertEqual(self.collector.sdk_client, self.mock_sdk_client)
         self.assertEqual(self.collector.logger, self.mock_logger)
     
     def test_initialization_without_logger(self):
         """Test ClusterDataCollector initialization without logger creates default logger"""
-        collector = ClusterDataCollector(self.mock_azure_cli)
+        collector = ClusterDataCollector(self.mock_sdk_client)
         self.assertIsNotNone(collector.logger)
     
     def test_collect_cluster_info_success(self):
         """Test successful cluster info collection"""
-        # Mock cluster info
-        mock_cluster = {
+        # Mock cluster object from SDK
+        mock_cluster = Mock()
+        mock_cluster.as_dict.return_value = {
             'name': 'test-cluster',
             'location': 'eastus',
             'provisioningState': 'Succeeded'
         }
         
-        # Mock agent pools
-        mock_agent_pools = [
-            {'name': 'agentpool1', 'count': 3},
-            {'name': 'agentpool2', 'count': 2}
-        ]
+        # Mock agent pool objects from SDK
+        mock_pool1 = Mock()
+        mock_pool1.as_dict.return_value = {'name': 'agentpool1', 'count': 3}
+        mock_pool2 = Mock()
+        mock_pool2.as_dict.return_value = {'name': 'agentpool2', 'count': 2}
         
-        self.mock_azure_cli.execute.side_effect = [mock_cluster, mock_agent_pools]
+        # Setup SDK client mocks
+        self.mock_sdk_client.get_cluster.return_value = mock_cluster
+        self.mock_sdk_client.aks_client.agent_pools.list.return_value = [mock_pool1, mock_pool2]
         
         result = self.collector.collect_cluster_info('test-cluster', 'test-rg')
         
-        # Verify execute was called with correct commands
-        self.assertEqual(self.mock_azure_cli.execute.call_count, 2)
-        
-        cluster_cmd_call = self.mock_azure_cli.execute.call_args_list[0]
-        self.assertEqual(
-            cluster_cmd_call[0][0],
-            ['aks', 'show', '-n', 'test-cluster', '-g', 'test-rg', '-o', 'json']
-        )
-        
-        agent_pools_cmd_call = self.mock_azure_cli.execute.call_args_list[1]
-        self.assertEqual(
-            agent_pools_cmd_call[0][0],
-            ['aks', 'nodepool', 'list', '-g', 'test-rg', '--cluster-name', 'test-cluster', '-o', 'json']
-        )
+        # Verify SDK methods were called correctly
+        self.mock_sdk_client.get_cluster.assert_called_once_with('test-rg', 'test-cluster')
+        self.mock_sdk_client.aks_client.agent_pools.list.assert_called_once_with('test-rg', 'test-cluster')
         
         # Verify result structure
         self.assertIn('cluster_info', result)
         self.assertIn('agent_pools', result)
-        self.assertEqual(result['cluster_info'], mock_cluster)
-        self.assertEqual(result['agent_pools'], mock_agent_pools)
+        self.assertEqual(result['cluster_info']['name'], 'test-cluster')
+        self.assertEqual(len(result['agent_pools']), 2)
     
     def test_collect_cluster_info_no_cluster(self):
         """Test cluster info collection when cluster doesn't exist"""
-        self.mock_azure_cli.execute.return_value = None
+        self.mock_sdk_client.get_cluster.side_effect = ResourceNotFoundError("Cluster not found")
         
         with self.assertRaises(ValueError) as context:
             self.collector.collect_cluster_info('nonexistent-cluster', 'test-rg')
         
-        self.assertIn('Failed to get cluster information', str(context.exception))
+        self.assertIn('not found', str(context.exception))
     
     def test_collect_cluster_info_invalid_response(self):
-        """Test cluster info collection with invalid response type"""
-        self.mock_azure_cli.execute.return_value = "invalid response"
+        """Test cluster info collection with HTTP error"""
+        mock_error = HttpResponseError("Service unavailable")
+        mock_error.message = "Service unavailable"
+        self.mock_sdk_client.get_cluster.side_effect = mock_error
         
         with self.assertRaises(ValueError) as context:
             self.collector.collect_cluster_info('test-cluster', 'test-rg')
@@ -85,13 +80,16 @@ class TestClusterDataCollector(unittest.TestCase):
         self.assertIn('Failed to get cluster information', str(context.exception))
     
     def test_collect_cluster_info_no_agent_pools(self):
-        """Test cluster info collection when agent pools command returns non-list"""
-        mock_cluster = {'name': 'test-cluster'}
-        self.mock_azure_cli.execute.side_effect = [mock_cluster, None]
+        """Test cluster info collection when agent pools list is empty"""
+        mock_cluster = Mock()
+        mock_cluster.as_dict.return_value = {'name': 'test-cluster'}
+        
+        self.mock_sdk_client.get_cluster.return_value = mock_cluster
+        self.mock_sdk_client.aks_client.agent_pools.list.return_value = []
         
         result = self.collector.collect_cluster_info('test-cluster', 'test-rg')
         
-        self.assertEqual(result['cluster_info'], mock_cluster)
+        self.assertEqual(result['cluster_info']['name'], 'test-cluster')
         self.assertEqual(result['agent_pools'], [])
     
     def test_collect_vnet_info_no_subnets(self):
@@ -117,41 +115,33 @@ class TestClusterDataCollector(unittest.TestCase):
             {'name': 'agentpool1', 'vnetSubnetId': subnet_id}
         ]
         
-        mock_vnet = {
-            'id': '/subscriptions/sub-123/resourceGroups/vnet-rg/providers/Microsoft.Network/virtualNetworks/test-vnet',
-            'addressSpace': {'addressPrefixes': ['10.0.0.0/16']},
-            'name': 'test-vnet'
-        }
+        # Mock VNet object from SDK
+        mock_vnet = Mock()
+        mock_vnet.id = '/subscriptions/sub-123/resourceGroups/vnet-rg/providers/Microsoft.Network/virtualNetworks/test-vnet'
+        mock_vnet.name = 'test-vnet'
+        mock_vnet.address_space = Mock()
+        mock_vnet.address_space.address_prefixes = ['10.0.0.0/16']
         
-        mock_peerings = [
-            {
-                'name': 'peering1',
-                'remoteVirtualNetwork': {'id': '/subscriptions/sub-123/resourceGroups/other-rg/providers/Microsoft.Network/virtualNetworks/other-vnet'},
-                'peeringState': 'Connected',
-                'allowVirtualNetworkAccess': True,
-                'allowForwardedTraffic': False,
-                'allowGatewayTransit': False,
-                'useRemoteGateways': False
-            }
-        ]
+        # Mock peering object from SDK
+        mock_peering = Mock()
+        mock_peering.name = 'peering1'
+        mock_peering.remote_virtual_network = Mock()
+        mock_peering.remote_virtual_network.id = '/subscriptions/sub-123/resourceGroups/other-rg/providers/Microsoft.Network/virtualNetworks/other-vnet'
+        mock_peering.peering_state = 'Connected'
+        mock_peering.allow_virtual_network_access = True
+        mock_peering.allow_forwarded_traffic = False
+        mock_peering.allow_gateway_transit = False
+        mock_peering.use_remote_gateways = False
         
-        self.mock_azure_cli.execute.side_effect = [mock_vnet, mock_peerings]
+        # Setup SDK client mocks
+        self.mock_sdk_client.network_client.virtual_networks.get.return_value = mock_vnet
+        self.mock_sdk_client.network_client.virtual_network_peerings.list.return_value = [mock_peering]
         
         result = self.collector.collect_vnet_info(agent_pools)
         
-        # Verify VNet show command was called
-        vnet_cmd_call = self.mock_azure_cli.execute.call_args_list[0]
-        self.assertEqual(
-            vnet_cmd_call[0][0],
-            ['network', 'vnet', 'show', '-n', 'test-vnet', '-g', 'vnet-rg', '-o', 'json']
-        )
-        
-        # Verify peering command was called
-        peering_cmd_call = self.mock_azure_cli.execute.call_args_list[1]
-        self.assertEqual(
-            peering_cmd_call[0][0],
-            ['network', 'vnet', 'peering', 'list', '-g', 'vnet-rg', '--vnet-name', 'test-vnet', '-o', 'json']
-        )
+        # Verify SDK methods were called correctly
+        self.mock_sdk_client.network_client.virtual_networks.get.assert_called_once_with('vnet-rg', 'test-vnet')
+        self.mock_sdk_client.network_client.virtual_network_peerings.list.assert_called_once_with('vnet-rg', 'test-vnet')
         
         # Verify result structure
         self.assertEqual(len(result), 1)
@@ -175,22 +165,29 @@ class TestClusterDataCollector(unittest.TestCase):
             {'name': 'pool3', 'vnetSubnetId': subnet_id_3}   # Different VNet
         ]
         
-        mock_vnet_1 = {
-            'id': 'vnet-1-id',
-            'name': 'vnet-1',
-            'addressSpace': {'addressPrefixes': ['10.0.0.0/16']}
-        }
+        # Mock VNet 1 object
+        mock_vnet_1 = Mock()
+        mock_vnet_1.id = 'vnet-1-id'
+        mock_vnet_1.name = 'vnet-1'
+        mock_vnet_1.address_space = Mock()
+        mock_vnet_1.address_space.address_prefixes = ['10.0.0.0/16']
         
-        mock_vnet_2 = {
-            'id': 'vnet-2-id',
-            'name': 'vnet-2',
-            'addressSpace': {'addressPrefixes': ['10.1.0.0/16']}
-        }
+        # Mock VNet 2 object
+        mock_vnet_2 = Mock()
+        mock_vnet_2.id = 'vnet-2-id'
+        mock_vnet_2.name = 'vnet-2'
+        mock_vnet_2.address_space = Mock()
+        mock_vnet_2.address_space.address_prefixes = ['10.1.0.0/16']
         
-        self.mock_azure_cli.execute.side_effect = [
-            mock_vnet_1, [],  # VNet 1 with no peerings
-            mock_vnet_2, []   # VNet 2 with no peerings
-        ]
+        # Setup SDK client mocks - return different VNets based on name
+        def get_vnet_mock(rg, name):
+            if name == 'vnet-1':
+                return mock_vnet_1
+            else:
+                return mock_vnet_2
+        
+        self.mock_sdk_client.network_client.virtual_networks.get.side_effect = get_vnet_mock
+        self.mock_sdk_client.network_client.virtual_network_peerings.list.return_value = []
         
         result = self.collector.collect_vnet_info(agent_pools)
         
@@ -213,12 +210,15 @@ class TestClusterDataCollector(unittest.TestCase):
         """Test successful VMSS info collection"""
         cluster_info = {'nodeResourceGroup': 'MC_test-rg_test-cluster_eastus'}
         
-        mock_vmss_list = [
-            {'name': 'aks-agentpool-12345-vmss'},
-            {'name': 'aks-userpool-67890-vmss'}
-        ]
+        # Mock VMSS list objects
+        mock_vmss_1 = Mock()
+        mock_vmss_1.name = 'aks-agentpool-12345-vmss'
+        mock_vmss_2 = Mock()
+        mock_vmss_2.name = 'aks-userpool-67890-vmss'
         
-        mock_vmss_detail_1 = {
+        # Mock detailed VMSS objects
+        mock_vmss_detail_1 = Mock()
+        mock_vmss_detail_1.as_dict.return_value = {
             'name': 'aks-agentpool-12345-vmss',
             'virtualMachineProfile': {
                 'networkProfile': {
@@ -237,7 +237,8 @@ class TestClusterDataCollector(unittest.TestCase):
             }
         }
         
-        mock_vmss_detail_2 = {
+        mock_vmss_detail_2 = Mock()
+        mock_vmss_detail_2.as_dict.return_value = {
             'name': 'aks-userpool-67890-vmss',
             'virtualMachineProfile': {
                 'networkProfile': {
@@ -256,23 +257,15 @@ class TestClusterDataCollector(unittest.TestCase):
             }
         }
         
-        self.mock_azure_cli.execute.side_effect = [
-            mock_vmss_list,
-            mock_vmss_detail_1,
-            mock_vmss_detail_2
-        ]
+        # Setup SDK client mocks
+        self.mock_sdk_client.compute_client.virtual_machine_scale_sets.list.return_value = [mock_vmss_1, mock_vmss_2]
+        self.mock_sdk_client.compute_client.virtual_machine_scale_sets.get.side_effect = [mock_vmss_detail_1, mock_vmss_detail_2]
         
         result = self.collector.collect_vmss_info(cluster_info)
         
-        # Verify VMSS list command
-        list_cmd_call = self.mock_azure_cli.execute.call_args_list[0]
-        self.assertEqual(
-            list_cmd_call[0][0],
-            ['vmss', 'list', '-g', 'MC_test-rg_test-cluster_eastus', '-o', 'json']
-        )
-        
-        # Verify VMSS details commands
-        self.assertEqual(self.mock_azure_cli.execute.call_count, 3)
+        # Verify SDK methods were called correctly
+        self.mock_sdk_client.compute_client.virtual_machine_scale_sets.list.assert_called_once_with('MC_test-rg_test-cluster_eastus')
+        self.assertEqual(self.mock_sdk_client.compute_client.virtual_machine_scale_sets.get.call_count, 2)
         
         # Verify result
         self.assertEqual(len(result), 2)
@@ -281,17 +274,18 @@ class TestClusterDataCollector(unittest.TestCase):
     
     def test_collect_vmss_info_empty_list(self):
         """Test VMSS collection when no VMSS are found"""
-        cluster_info = {'nodeResourceGroup': 'MC_test-rg'}
-        self.mock_azure_cli.execute.return_value = []
+        cluster_info = {'nodeResourceGroup': 'MC_test-rg_test-cluster_eastus'}
+        self.mock_sdk_client.compute_client.virtual_machine_scale_sets.list.return_value = []
         
         result = self.collector.collect_vmss_info(cluster_info)
         
         self.assertEqual(result, [])
     
-    def test_collect_vmss_info_invalid_response(self):
-        """Test VMSS collection with invalid response type"""
+    def test_collect_vmss_info_http_error(self):
+        """Test VMSS collection with HTTP error"""
         cluster_info = {'nodeResourceGroup': 'MC_test-rg'}
-        self.mock_azure_cli.execute.return_value = "invalid"
+        mock_error = HttpResponseError("Service unavailable")
+        self.mock_sdk_client.compute_client.virtual_machine_scale_sets.list.side_effect = mock_error
         
         result = self.collector.collect_vmss_info(cluster_info)
         
@@ -299,29 +293,33 @@ class TestClusterDataCollector(unittest.TestCase):
     
     def test_collect_all_success(self):
         """Test collect_all method integrates all collection methods"""
-        # Mock cluster info
-        mock_cluster = {
+        # Mock cluster object
+        mock_cluster = Mock()
+        mock_cluster.as_dict.return_value = {
             'name': 'test-cluster',
             'nodeResourceGroup': 'MC_test-rg'
         }
         
-        # Mock agent pools with subnet
-        mock_agent_pools = [
-            {
-                'name': 'agentpool1',
-                'vnetSubnetId': '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet/subnets/default'
-            }
-        ]
-        
-        # Mock VNet
-        mock_vnet = {
-            'name': 'vnet',
-            'addressSpace': {'addressPrefixes': ['10.0.0.0/16']}
+        # Mock agent pool objects
+        mock_pool = Mock()
+        mock_pool.as_dict.return_value = {
+            'name': 'agentpool1',
+            'vnetSubnetId': '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet/subnets/default'
         }
         
+        # Mock VNet
+        mock_vnet = Mock()
+        mock_vnet.name = 'vnet'
+        mock_vnet.id = 'vnet-id'
+        mock_vnet.address_space = Mock()
+        mock_vnet.address_space.address_prefixes = ['10.0.0.0/16']
+        
         # Mock VMSS
-        mock_vmss_list = [{'name': 'vmss-1'}]
-        mock_vmss_detail = {
+        mock_vmss = Mock()
+        mock_vmss.name = 'vmss-1'
+        
+        mock_vmss_detail = Mock()
+        mock_vmss_detail.as_dict.return_value = {
             'name': 'vmss-1',
             'virtualMachineProfile': {
                 'networkProfile': {
@@ -330,14 +328,13 @@ class TestClusterDataCollector(unittest.TestCase):
             }
         }
         
-        self.mock_azure_cli.execute.side_effect = [
-            mock_cluster,           # collect_cluster_info: cluster
-            mock_agent_pools,       # collect_cluster_info: agent pools
-            mock_vnet,             # collect_vnet_info: vnet show
-            [],                    # collect_vnet_info: peerings
-            mock_vmss_list,        # collect_vmss_info: vmss list
-            mock_vmss_detail       # collect_vmss_info: vmss detail
-        ]
+        # Setup SDK client mocks
+        self.mock_sdk_client.get_cluster.return_value = mock_cluster
+        self.mock_sdk_client.aks_client.agent_pools.list.return_value = [mock_pool]
+        self.mock_sdk_client.network_client.virtual_networks.get.return_value = mock_vnet
+        self.mock_sdk_client.network_client.virtual_network_peerings.list.return_value = []
+        self.mock_sdk_client.compute_client.virtual_machine_scale_sets.list.return_value = [mock_vmss]
+        self.mock_sdk_client.compute_client.virtual_machine_scale_sets.get.return_value = mock_vmss_detail
         
         result = self.collector.collect_all('test-cluster', 'test-rg')
         
@@ -348,8 +345,8 @@ class TestClusterDataCollector(unittest.TestCase):
         self.assertIn('vmss_analysis', result)
         
         # Verify data
-        self.assertEqual(result['cluster_info'], mock_cluster)
-        self.assertEqual(result['agent_pools'], mock_agent_pools)
+        self.assertEqual(result['cluster_info']['name'], 'test-cluster')
+        self.assertEqual(len(result['agent_pools']), 1)
         self.assertEqual(len(result['vnets_analysis']), 1)
         self.assertEqual(len(result['vmss_analysis']), 1)
 
