@@ -5,30 +5,32 @@ This module analyzes DNS configuration for AKS clusters, including:
 - Private DNS zone configuration
 - DNS resolution validation
 - Private IP validation for private clusters
+
+Migrated from Azure CLI subprocess to Azure SDK for Python.
 """
 
 import logging
 import re
 import ipaddress
 from typing import Dict, List, Any, Optional
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 from .models import Finding
-from .azure_cli import AzureCLIExecutor
 
 
 class DNSAnalyzer:
     """Analyzer for AKS DNS configuration and resolution"""
     
-    def __init__(self, cluster_info: Dict[str, Any], azure_cli: Optional[AzureCLIExecutor] = None):
+    def __init__(self, cluster_info: Dict[str, Any], azure_sdk_client=None):
         """
         Initialize DNS analyzer
         
         Args:
-            cluster_info: AKS cluster information from Azure CLI
-            azure_cli: Optional Azure CLI executor for making Azure CLI calls
+            cluster_info: AKS cluster information from Azure SDK
+            azure_sdk_client: Optional AzureSDKClient instance for SDK operations
         """
         self.logger = logging.getLogger("aks_net_diagnostics.dns_analyzer")
         self.cluster_info = cluster_info
-        self.azure_cli = azure_cli
+        self.sdk_client = azure_sdk_client
         self.dns_analysis: Dict[str, Any] = {}
         self.findings: List[Finding] = []
         self.vnet_dns_servers: List[str] = []
@@ -131,33 +133,30 @@ class DNSAnalyzer:
             
             self.logger.debug(f"  Found VNet subnet ID: {vnet_subnet_id}")
             
-            # Parse VNet resource ID from subnet ID
+            # Parse VNet resource ID from subnet ID using SDK helper
             # Format: /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{subnet}
-            vnet_parts = vnet_subnet_id.split('/')
-            if len(vnet_parts) < 9:
-                self.logger.warning(f"  Unable to parse VNet ID from subnet: {vnet_subnet_id}")
+            try:
+                parsed = self.sdk_client.parse_resource_id(vnet_subnet_id)
+                vnet_rg = parsed['resource_group']
+                vnet_name = parsed['parent_name']  # VNet is parent of subnet
+                
+                # Get VNet details including DNS servers using SDK
+                # (replaces: az network vnet show)
+                vnet = self.sdk_client.network_client.virtual_networks.get(vnet_rg, vnet_name)
+                
+                # Get DNS servers from VNet
+                dhcp_options = vnet.dhcp_options
+                dns_servers = dhcp_options.dns_servers if dhcp_options else []
+                
+                self.vnet_dns_servers = dns_servers or []
+                self.dns_analysis['vnetDnsServers'] = self.vnet_dns_servers
+                
+            except (ResourceNotFoundError, HttpResponseError) as e:
+                self.logger.warning(f"  Unable to retrieve VNet information for {vnet_name}: {e}")
                 return
-            
-            vnet_rg = vnet_parts[4]
-            vnet_name = vnet_parts[8]
-            
-            # Get VNet details including DNS servers
-            vnet_info = self.azure_cli.execute([
-                'network', 'vnet', 'show',
-                '--name', vnet_name,
-                '--resource-group', vnet_rg
-            ])
-            
-            if not vnet_info:
-                self.logger.warning(f"  Unable to retrieve VNet information for {vnet_name}")
+            except Exception as e:
+                self.logger.warning(f"  Unable to parse VNet ID from subnet: {vnet_subnet_id}: {e}")
                 return
-            
-            # Get DNS servers from VNet
-            dhcp_options = vnet_info.get('dhcpOptions', {})
-            dns_servers = dhcp_options.get('dnsServers', [])
-            
-            self.vnet_dns_servers = dns_servers
-            self.dns_analysis['vnetDnsServers'] = dns_servers
             
             if not dns_servers:
                 # Using Azure default DNS
