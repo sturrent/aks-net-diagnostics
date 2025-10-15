@@ -6,13 +6,15 @@ This module analyzes outbound connectivity mechanisms including:
 - NAT Gateway configuration
 - User Defined Routing (UDR) with virtual appliances
 - Effective outbound path determination with UDR override detection
+
+Migrated from Azure CLI subprocess to Azure SDK for Python.
 """
 
 import logging
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 
-from .azure_cli import AzureCLIExecutor
 from .route_table_analyzer import RouteTableAnalyzer
 
 
@@ -32,7 +34,7 @@ class OutboundConnectivityAnalyzer:
         self,
         cluster_info: Dict[str, Any],
         agent_pools: List[Dict[str, Any]],
-        azure_cli: AzureCLIExecutor,
+        azure_sdk_client,
         logger: Optional[logging.Logger] = None
     ):
         """
@@ -41,12 +43,12 @@ class OutboundConnectivityAnalyzer:
         Args:
             cluster_info: AKS cluster configuration dictionary
             agent_pools: List of agent pool configurations
-            azure_cli: Azure CLI executor instance
+            azure_sdk_client: Azure SDK client instance
             logger: Optional logger instance
         """
         self.cluster_info = cluster_info
         self.agent_pools = agent_pools
-        self.azure_cli = azure_cli
+        self.sdk_client = azure_sdk_client
         self.logger = logger or logging.getLogger(__name__)
         
         # Results storage
@@ -241,43 +243,47 @@ class OutboundConnectivityAnalyzer:
                 self.logger.info("    No node resource group found")
             return
         
-        # List load balancers in the managed resource group
-        lb_cmd = ['network', 'lb', 'list', '-g', mc_rg, '-o', 'json']
-        load_balancers = self.azure_cli.execute(lb_cmd)
-        
-        if not isinstance(load_balancers, list):
-            if show_details:
-                self.logger.info(f"    No load balancers found in {mc_rg}")
+        try:
+            # List load balancers in the managed resource group using SDK (replaces: az network lb list)
+            load_balancers_list = list(
+                self.sdk_client.network_client.load_balancers.list(mc_rg)
+            )
+            
+            if not load_balancers_list:
+                if show_details:
+                    self.logger.info(f"    No load balancers found in {mc_rg}")
+                return
+            
+        except (ResourceNotFoundError, HttpResponseError) as e:
+            self.logger.warning(f"Failed to list load balancers in {mc_rg}: {e}")
             return
         
         # Process load balancers quietly and only report the final results
-        for lb in load_balancers:
-            lb_name = lb.get('name', '')
+        for lb in load_balancers_list:
+            lb_name = lb.name
             if not lb_name:
                 continue
             
             # Check outbound rules first
-            outbound_rules = lb.get('outboundRules', [])
-            frontend_configs = lb.get('frontendIpConfigurations', [])
+            outbound_rules = lb.outbound_rules or []
+            frontend_configs = lb.frontend_ip_configurations or []
             
             # Collect frontend config IDs that might have outbound IPs
             frontend_config_ids = []
             
             # Add frontend configs from outbound rules (this is the main path for AKS)
             for rule in outbound_rules:
-                # Try both possible field names for frontend IP configurations
-                frontend_ips = rule.get('frontendIPConfigurations', [])
-                if not frontend_ips:
-                    frontend_ips = rule.get('frontendIpConfigurations', [])
+                # SDK uses frontend_ip_configurations (snake_case)
+                frontend_ips = rule.frontend_ip_configurations or []
                 
                 for frontend_ip in frontend_ips:
-                    if frontend_ip.get('id'):
-                        frontend_config_ids.append(frontend_ip['id'])
+                    if frontend_ip.id:
+                        frontend_config_ids.append(frontend_ip.id)
             
             # Also add all direct frontend configs (for standard LB without outbound rules)
             for frontend in frontend_configs:
-                if frontend.get('id'):
-                    frontend_config_ids.append(frontend['id'])
+                if frontend.id:
+                    frontend_config_ids.append(frontend.id)
             
             # Process each frontend config
             for config_id in frontend_config_ids:
@@ -286,22 +292,28 @@ class OutboundConnectivityAnalyzer:
                 if len(parts) >= 11:
                     config_name = parts[10]  # Frontend IP config name
                     
-                    # Get the frontend IP configuration details
-                    frontend_cmd = ['network', 'lb', 'frontend-ip', 'show', 
-                                  '-g', mc_rg, '--lb-name', lb_name, '-n', config_name, '-o', 'json']
-                    frontend_config = self.azure_cli.execute(frontend_cmd)
-                    
-                    if isinstance(frontend_config, dict):
-                        public_ip = frontend_config.get('publicIPAddress', {})
-                        if public_ip and public_ip.get('id'):
-                            # Get public IP details
-                            ip_cmd = ['network', 'public-ip', 'show', '--ids', public_ip['id'], '-o', 'json']
-                            ip_info = self.azure_cli.execute(ip_cmd)
-                            
-                            if ip_info and ip_info.get('ipAddress'):
-                                ip_address = ip_info['ipAddress']
-                                if ip_address not in self.outbound_ips:
-                                    self.outbound_ips.append(ip_address)
+                    try:
+                        # Get the frontend IP configuration details using SDK
+                        # (replaces: az network lb frontend-ip show)
+                        frontend_config = self.sdk_client.network_client.load_balancer_frontend_ip_configurations.get(
+                            mc_rg, lb_name, config_name
+                        )
+                        
+                        if frontend_config and frontend_config.public_ip_address:
+                            public_ip_id = frontend_config.public_ip_address.id
+                            if public_ip_id:
+                                # Get public IP details using SDK
+                                # (replaces: az network public-ip show --ids)
+                                ip_info = self._get_public_ip_details(public_ip_id)
+                                
+                                if ip_info and ip_info.get('ipAddress'):
+                                    ip_address = ip_info['ipAddress']
+                                    if ip_address not in self.outbound_ips:
+                                        self.outbound_ips.append(ip_address)
+                                        
+                    except (ResourceNotFoundError, HttpResponseError) as e:
+                        self.logger.debug(f"Failed to get frontend config {config_name}: {e}")
+                        continue
         
         # Summary of outbound IP discovery will be handled by _display_outbound_summary
         if show_details and not self.outbound_ips:
@@ -339,30 +351,37 @@ class OutboundConnectivityAnalyzer:
                 self.logger.info("    No node resource group found")
             return
         
-        # List NAT Gateways in the managed resource group
-        natgw_cmd = ['network', 'nat', 'gateway', 'list', '-g', mc_rg, '-o', 'json']
-        nat_gateways = self.azure_cli.execute(natgw_cmd)
-        
-        if not isinstance(nat_gateways, list):
-            if show_details:
-                self.logger.info(f"    No NAT Gateways found in {mc_rg}")
+        try:
+            # List NAT Gateways in the managed resource group using SDK
+            # (replaces: az network nat gateway list)
+            nat_gateways_list = list(
+                self.sdk_client.network_client.nat_gateways.list(mc_rg)
+            )
+            
+            if not nat_gateways_list:
+                if show_details:
+                    self.logger.info(f"    No NAT Gateways found in {mc_rg}")
+                return
+                
+        except (ResourceNotFoundError, HttpResponseError) as e:
+            self.logger.warning(f"Failed to list NAT Gateways in {mc_rg}: {e}")
             return
         
         # Process each NAT Gateway
-        for natgw in nat_gateways:
-            natgw_name = natgw.get('name', '')
+        for natgw in nat_gateways_list:
+            natgw_name = natgw.name
             if not natgw_name:
                 continue
             
             self.logger.info(f"    Found NAT Gateway: {natgw_name}")
             
             # Get public IP prefixes and public IPs associated with this NAT Gateway
-            public_ip_prefixes = natgw.get('publicIpPrefixes', [])
-            public_ips = natgw.get('publicIpAddresses', [])
+            public_ip_prefixes = natgw.public_ip_prefixes or []
+            public_ips = natgw.public_ip_addresses or []
             
             # Extract IPs from public IP resources
             for public_ip_ref in public_ips:
-                public_ip_id = public_ip_ref.get('id', '')
+                public_ip_id = public_ip_ref.id if public_ip_ref else None
                 if public_ip_id:
                     public_ip_info = self._get_public_ip_details(public_ip_id)
                     if public_ip_info:
@@ -406,26 +425,36 @@ class OutboundConnectivityAnalyzer:
             Dictionary with public IP details or None if error
         """
         try:
-            # Parse public IP ID to extract components
-            parts = public_ip_id.split('/')
-            if len(parts) < 9:
-                return None
+            # Parse public IP ID to extract components using SDK client helper
+            parsed = self.sdk_client.parse_resource_id(public_ip_id)
+            subscription_id = parsed['subscription_id']
+            resource_group = parsed['resource_group']
+            public_ip_name = parsed['resource_name']
             
-            subscription_id = parts[2]
-            resource_group = parts[4]
-            public_ip_name = parts[8]
+            # Create network client for the public IP's subscription if different
+            if subscription_id != self.sdk_client.subscription_id:
+                # Need to create a client for different subscription
+                from azure.mgmt.network import NetworkManagementClient
+                network_client = NetworkManagementClient(
+                    self.sdk_client.credential,
+                    subscription_id
+                )
+            else:
+                network_client = self.sdk_client.network_client
             
-            # Get public IP details
-            cmd = ['network', 'public-ip', 'show',
-                   '--subscription', subscription_id,
-                   '-g', resource_group,
-                   '-n', public_ip_name,
-                   '-o', 'json']
+            # Get public IP details using SDK (replaces: az network public-ip show)
+            public_ip = network_client.public_ip_addresses.get(
+                resource_group, public_ip_name
+            )
             
-            return self.azure_cli.execute(cmd)
+            # Convert to dictionary for compatibility
+            return public_ip.as_dict()
             
-        except Exception as e:
+        except (ResourceNotFoundError, HttpResponseError) as e:
             self.logger.debug(f"Error getting public IP details for {public_ip_id}: {e}")
+            return None
+        except Exception as e:
+            self.logger.debug(f"Error parsing public IP ID {public_ip_id}: {e}")
             return None
     
     def _get_public_ip_prefix_details(self, prefix_id: str) -> Optional[Dict[str, Any]]:
@@ -439,24 +468,33 @@ class OutboundConnectivityAnalyzer:
             Dictionary with public IP prefix details or None if error
         """
         try:
-            # Parse public IP prefix ID to extract components
-            parts = prefix_id.split('/')
-            if len(parts) < 9:
-                return None
+            # Parse public IP prefix ID to extract components using SDK client helper
+            parsed = self.sdk_client.parse_resource_id(prefix_id)
+            subscription_id = parsed['subscription_id']
+            resource_group = parsed['resource_group']
+            prefix_name = parsed['resource_name']
             
-            subscription_id = parts[2]
-            resource_group = parts[4]
-            prefix_name = parts[8]
+            # Create network client for the prefix's subscription if different
+            if subscription_id != self.sdk_client.subscription_id:
+                from azure.mgmt.network import NetworkManagementClient
+                network_client = NetworkManagementClient(
+                    self.sdk_client.credential,
+                    subscription_id
+                )
+            else:
+                network_client = self.sdk_client.network_client
             
-            # Get public IP prefix details
-            cmd = ['network', 'public-ip', 'prefix', 'show',
-                   '--subscription', subscription_id,
-                   '-g', resource_group,
-                   '-n', prefix_name,
-                   '-o', 'json']
+            # Get public IP prefix details using SDK (replaces: az network public-ip prefix show)
+            public_ip_prefix = network_client.public_ip_prefixes.get(
+                resource_group, prefix_name
+            )
             
-            return self.azure_cli.execute(cmd)
+            # Convert to dictionary for compatibility
+            return public_ip_prefix.as_dict()
             
-        except Exception as e:
+        except (ResourceNotFoundError, HttpResponseError) as e:
             self.logger.debug(f"Error getting public IP prefix details for {prefix_id}: {e}")
+            return None
+        except Exception as e:
+            self.logger.debug(f"Error parsing public IP prefix ID {prefix_id}: {e}")
             return None
