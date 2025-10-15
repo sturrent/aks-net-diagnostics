@@ -5,8 +5,10 @@ Handles active connectivity probing from VMSS instances including:
 - API server reachability testing
 - DNS resolution validation
 - Network connectivity checks
-- VMSS command execution
+- VMSS command execution via Azure SDK
 - Test result analysis
+
+Migrated from Azure CLI subprocess to Azure SDK for Python.
 """
 
 import logging
@@ -15,6 +17,8 @@ import json
 import ipaddress
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Tuple
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
+from azure.mgmt.compute.models import RunCommandInput
 
 
 @dataclass
@@ -29,18 +33,18 @@ class VMSSInstance:
 class ConnectivityTester:
     """Manages connectivity testing from AKS VMSS instances"""
     
-    def __init__(self, cluster_info: Dict[str, Any], azure_cli_executor, dns_analyzer=None, show_details: bool = False):
+    def __init__(self, cluster_info: Dict[str, Any], azure_sdk_client, dns_analyzer=None, show_details: bool = False):
         """
         Initialize Connectivity Tester
         
         Args:
             cluster_info: AKS cluster information dictionary
-            azure_cli_executor: AzureCLIExecutor instance for executing Azure CLI commands
+            azure_sdk_client: AzureSDKClient instance for SDK operations
             dns_analyzer: Optional DNS analyzer for private DNS validation
             show_details: Whether to show detailed test output
         """
         self.cluster_info = cluster_info
-        self.azure_cli_executor = azure_cli_executor
+        self.sdk_client = azure_sdk_client
         self.dns_analyzer = dns_analyzer
         self.show_details = show_details
         self.logger = logging.getLogger("aks_net_diagnostics.connectivity_tester")
@@ -143,34 +147,32 @@ class ConnectivityTester:
             return instances
 
         try:
-            vmss_list = self.azure_cli_executor.execute(['vmss', 'list', '-g', mc_rg, '-o', 'json'])
-        except RuntimeError as exc:
+            # List VMSS using SDK (replaces: az vmss list)
+            vmss_list = list(self.sdk_client.compute_client.virtual_machine_scale_sets.list(mc_rg))
+        except (ResourceNotFoundError, HttpResponseError) as exc:
             self.logger.info(f"Error listing VMSS in {mc_rg}: {exc}")
             return instances
 
-        if not isinstance(vmss_list, list):
-            return instances
-
         for vmss in vmss_list:
-            vmss_name = vmss.get('name')
+            vmss_name = vmss.name
             if not vmss_name:
                 continue
 
             try:
-                vmss_nodes = self.azure_cli_executor.execute(['vmss', 'list-instances', '-g', mc_rg, '-n', vmss_name, '-o', 'json'])
-            except RuntimeError as exc:
+                # List VMSS instances using SDK (replaces: az vmss list-instances)
+                vmss_nodes = list(
+                    self.sdk_client.compute_client.virtual_machine_scale_set_vms.list(mc_rg, vmss_name)
+                )
+            except (ResourceNotFoundError, HttpResponseError) as exc:
                 self.logger.info(f"Error listing VMSS instances for {vmss_name}: {exc}")
-                continue
-
-            if not isinstance(vmss_nodes, list):
                 continue
 
             # Find first running instance
             for node in vmss_nodes:
-                prov_state = node.get('provisioningState', '')
-                if prov_state.lower() == 'succeeded':
-                    instance_id = node.get('instanceId')
-                    computer_name = node.get('osProfile', {}).get('computerName', '')
+                prov_state = node.provisioning_state
+                if prov_state and prov_state.lower() == 'succeeded':
+                    instance_id = node.instance_id
+                    computer_name = node.os_profile.computer_name if node.os_profile else ''
                     
                     if instance_id:
                         instances.append(VMSSInstance(
@@ -344,19 +346,32 @@ class ConnectivityTester:
             return result
         
         try:
-            # Execute command via az vmss run-command
-            cmd = [
-                'vmss', 'run-command', 'invoke',
-                '--resource-group', mc_rg,
-                '--name', vmss_instance.vmss_name,
-                '--instance-id', vmss_instance.instance_id,
-                '--command-id', 'RunShellScript',
-                '--scripts', test["command"]
-            ]
+            # Execute command via SDK vmss run-command (replaces: az vmss run-command invoke)
+            # This is an async operation in the SDK
+            run_command_params = RunCommandInput(
+                command_id='RunShellScript',
+                script=[test["command"]]
+            )
             
-            response = self._run_vmss_command(cmd)
-            result = self._analyze_test_result(test, response, result)
+            # Begin the async operation
+            async_operation = self.sdk_client.compute_client.virtual_machine_scale_set_vms.begin_run_command(
+                mc_rg,
+                vmss_instance.vmss_name,
+                vmss_instance.instance_id,
+                run_command_params
+            )
             
+            # Wait for completion (with 300 second timeout, same as Azure CLI version)
+            response = async_operation.result(timeout=300)
+            
+            # Convert response to dictionary for compatibility
+            response_dict = response.as_dict() if response else None
+            result = self._analyze_test_result(test, response_dict, result)
+            
+        except (ResourceNotFoundError, HttpResponseError) as e:
+            result["analysis"] = f"Error executing test: {str(e)}"
+            result["status"] = "error"
+            self.logger.debug(f"Test '{test['name']}' SDK error: {e}")
         except Exception as e:
             result["analysis"] = f"Error executing test: {str(e)}"
             result["status"] = "error"
@@ -364,24 +379,7 @@ class ConnectivityTester:
         
         return result
     
-    def _run_vmss_command(self, cmd: List[str]) -> Any:
-        """
-        Execute Azure CLI command for VMSS run-command with extended timeout
-        
-        VMSS run-command operations can take significantly longer than standard
-        Azure CLI commands due to:
-        - Command queuing on the VMSS instance
-        - Extension execution time
-        - Network latency for command delivery and result retrieval
-        
-        Using 300 seconds (5 minutes) timeout instead of default 90 seconds.
-        """
-        try:
-            # Use extended timeout of 300 seconds (5 minutes) for VMSS run-command
-            return self.azure_cli_executor.execute(cmd, timeout=300)
-        except RuntimeError as e:
-            self.logger.debug(f"VMSS command failed: {e}")
-            raise
+    # _run_vmss_command method removed - now using SDK's begin_run_command directly
     
     def _analyze_test_result(self, test: Dict[str, Any], response: Any, result: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze the result of a connectivity test"""
