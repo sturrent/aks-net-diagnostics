@@ -4,7 +4,7 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![Azure CLI 2.0+](https://img.shields.io/badge/Azure%20CLI-2.0+-blue.svg)](https://docs.microsoft.com/en-us/cli/azure/)
-[![Tests](https://img.shields.io/badge/tests-147%20passing-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-139%20passing-success.svg)](tests/)
 
 ## Key Features
 
@@ -12,7 +12,7 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 - **Active Testing**: Optional connectivity probes from cluster nodes
 - **Multiple Output Formats**: Console summary + detailed output + JSON export
 - **Security Focused**: NSG compliance, inter-node traffic validation
-- **Modular design**: 147 unit tests, modular architecture
+- **Modular design**: 139 unit tests, modular architecture
 - **Detailed Reports**: Actionable recommendations for every finding
 
 ## Table of Contents
@@ -57,7 +57,7 @@ chmod +x aks-net-diagnostics.pyz
 ```
 
 **Advantages:**
-- Single file (~57 KB)
+- Single file (~55 KB)
 - No installation required
 - Just download and run
 - All modules bundled inside
