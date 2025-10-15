@@ -11,7 +11,8 @@ Tests cover:
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 from aks_diagnostics.route_table_analyzer import RouteTableAnalyzer
 
 
@@ -20,7 +21,7 @@ class TestRouteTableAnalyzer(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures"""
-        self.mock_azure_cli = MagicMock()
+        self.mock_sdk_client = MagicMock()
         
         # Sample agent pools with subnet IDs
         self.agent_pools = [
@@ -30,12 +31,12 @@ class TestRouteTableAnalyzer(unittest.TestCase):
             }
         ]
         
-        self.analyzer = RouteTableAnalyzer(self.agent_pools, self.mock_azure_cli)
+        self.analyzer = RouteTableAnalyzer(self.agent_pools, self.mock_sdk_client)
     
     def test_initialization(self):
         """Test analyzer initialization"""
         self.assertEqual(self.analyzer.agent_pools, self.agent_pools)
-        self.assertEqual(self.analyzer.azure_cli, self.mock_azure_cli)
+        self.assertEqual(self.analyzer.sdk_client, self.mock_sdk_client)
     
     def test_get_unique_subnet_ids(self):
         """Test extraction of unique subnet IDs"""
@@ -47,7 +48,7 @@ class TestRouteTableAnalyzer(unittest.TestCase):
             {"vnetSubnetId": None},  # should be filtered
         ]
         
-        analyzer = RouteTableAnalyzer(agent_pools, self.mock_azure_cli)
+        analyzer = RouteTableAnalyzer(agent_pools, self.mock_sdk_client)
         subnet_ids = analyzer._get_unique_subnet_ids()
         
         # Should return only 2 unique subnet IDs (duplicates and null filtered)
@@ -60,7 +61,7 @@ class TestRouteTableAnalyzer(unittest.TestCase):
             {"vnetSubnetId": "null"}
         ]
         
-        analyzer = RouteTableAnalyzer(agent_pools, self.mock_azure_cli)
+        analyzer = RouteTableAnalyzer(agent_pools, self.mock_sdk_client)
         result = analyzer.analyze()
         
         self.assertEqual(result["routeTables"], [])
@@ -71,64 +72,108 @@ class TestRouteTableAnalyzer(unittest.TestCase):
     def test_get_subnet_details(self):
         """Test subnet details retrieval"""
         subnet_id = "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/subnet1"
+    
+        # Mock parse_resource_id
+        self.mock_sdk_client.parse_resource_id.return_value = {
+            'subscription_id': 'sub1',
+            'resource_group': 'rg1',
+            'parent_name': 'vnet1',
+            'resource_name': 'subnet1'
+        }
         
-        mock_subnet_data = {
+        # Mock subscription ID check
+        self.mock_sdk_client.subscription_id = 'sub1'
+        
+        # Mock subnet object
+        mock_subnet = Mock()
+        mock_subnet.route_table = Mock()
+        mock_subnet.route_table.id = "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/routeTables/rt1"
+        mock_subnet.as_dict.return_value = {
             "name": "subnet1",
             "routeTable": {
                 "id": "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/routeTables/rt1"
             }
         }
         
-        self.mock_azure_cli.execute.return_value = mock_subnet_data
+        self.mock_sdk_client.network_client.subnets.get.return_value = mock_subnet
         
         result = self.analyzer._get_subnet_details(subnet_id)
         
-        self.assertEqual(result, mock_subnet_data)
-        self.mock_azure_cli.execute.assert_called_once()
-        
-        # Verify correct CLI command
-        call_args = self.mock_azure_cli.execute.call_args[0][0]
-        self.assertIn('network', call_args)
-        self.assertIn('vnet', call_args)
-        self.assertIn('subnet', call_args)
-        self.assertIn('show', call_args)
+        self.assertEqual(result["name"], "subnet1")
+        self.assertEqual(result["routeTable"]["id"], "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/routeTables/rt1")
+        self.mock_sdk_client.parse_resource_id.assert_called_once_with(subnet_id)
+        self.mock_sdk_client.network_client.subnets.get.assert_called_once_with('rg1', 'vnet1', 'subnet1')
     
     def test_get_subnet_details_invalid_id(self):
         """Test subnet details with invalid subnet ID"""
         invalid_subnet_id = "/too/short/path"
         
+        # Mock parse_resource_id to raise ValueError for invalid ID
+        self.mock_sdk_client.parse_resource_id.side_effect = ValueError("Invalid resource ID format")
+        
         result = self.analyzer._get_subnet_details(invalid_subnet_id)
         
         self.assertIsNone(result)
-        self.mock_azure_cli.execute.assert_not_called()
+        self.mock_sdk_client.parse_resource_id.assert_called_once_with(invalid_subnet_id)
     
     def test_analyze_route_table_with_routes(self):
         """Test route table analysis with multiple routes"""
         route_table_id = "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/routeTables/rt1"
         subnet_id = "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/subnet1"
         
-        mock_route_table_data = {
+        # Mock parse_resource_id
+        self.mock_sdk_client.parse_resource_id.return_value = {
+            'subscription_id': 'sub1',
+            'resource_group': 'rg1',
+            'resource_name': 'rt1'
+        }
+        
+        # Mock subscription ID check
+        self.mock_sdk_client.subscription_id = 'sub1'
+        
+        # Mock route table object
+        mock_route1 = Mock()
+        mock_route1.name = "default-route"
+        mock_route1.address_prefix = "0.0.0.0/0"
+        mock_route1.next_hop_type = "VirtualAppliance"
+        mock_route1.next_hop_ip_address = "10.1.0.4"
+        mock_route1.provisioning_state = "Succeeded"
+        mock_route1.as_dict.return_value = {
+            "name": "default-route",
+            "addressPrefix": "0.0.0.0/0",
+            "nextHopType": "VirtualAppliance",
+            "nextHopIpAddress": "10.1.0.4",
+            "provisioningState": "Succeeded"
+        }
+        
+        mock_route2 = Mock()
+        mock_route2.name = "azure-route"
+        mock_route2.address_prefix = "168.63.129.16/32"
+        mock_route2.next_hop_type = "Internet"
+        mock_route2.next_hop_ip_address = ""
+        mock_route2.provisioning_state = "Succeeded"
+        mock_route2.as_dict.return_value = {
+            "name": "azure-route",
+            "addressPrefix": "168.63.129.16/32",
+            "nextHopType": "Internet",
+            "nextHopIpAddress": "",
+            "provisioningState": "Succeeded"
+        }
+        
+        mock_route_table = Mock()
+        mock_route_table.name = "rt1"
+        mock_route_table.disable_bgp_route_propagation = False
+        mock_route_table.routes = [mock_route1, mock_route2]
+        mock_route_table.as_dict.return_value = {
             "name": "rt1",
             "disableBgpRoutePropagation": False,
             "routes": [
-                {
-                    "name": "default-route",
-                    "addressPrefix": "0.0.0.0/0",
-                    "nextHopType": "VirtualAppliance",
-                    "nextHopIpAddress": "10.1.0.4",
-                    "provisioningState": "Succeeded"
-                },
-                {
-                    "name": "azure-route",
-                    "addressPrefix": "168.63.129.16/32",
-                    "nextHopType": "Internet",
-                    "nextHopIpAddress": "",
-                    "provisioningState": "Succeeded"
-                }
+                mock_route1.as_dict.return_value,
+                mock_route2.as_dict.return_value
             ]
         }
         
-        self.mock_azure_cli.execute.return_value = mock_route_table_data
+        self.mock_sdk_client.network_client.route_tables.get.return_value = mock_route_table
         
         result = self.analyzer._analyze_route_table(route_table_id, subnet_id)
         
@@ -144,13 +189,28 @@ class TestRouteTableAnalyzer(unittest.TestCase):
         route_table_id = "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/routeTables/rt1"
         subnet_id = "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/subnet1"
         
-        mock_route_table_data = {
+        # Mock parse_resource_id
+        self.mock_sdk_client.parse_resource_id.return_value = {
+            'subscription_id': 'sub1',
+            'resource_group': 'rg1',
+            'resource_name': 'rt1'
+        }
+        
+        # Mock subscription ID check
+        self.mock_sdk_client.subscription_id = 'sub1'
+        
+        # Mock route table object
+        mock_route_table = Mock()
+        mock_route_table.name = "rt1"
+        mock_route_table.disable_bgp_route_propagation = True
+        mock_route_table.routes = []
+        mock_route_table.as_dict.return_value = {
             "name": "rt1",
             "disableBgpRoutePropagation": True,
             "routes": []
         }
         
-        self.mock_azure_cli.execute.return_value = mock_route_table_data
+        self.mock_sdk_client.network_client.route_tables.get.return_value = mock_route_table
         
         result = self.analyzer._analyze_route_table(route_table_id, subnet_id)
         
@@ -344,38 +404,83 @@ class TestRouteTableAnalyzer(unittest.TestCase):
     
     def test_analyze_full_workflow(self):
         """Test complete analysis workflow"""
-        # Mock subnet response
-        mock_subnet_data = {
+        # Mock subscription ID check
+        self.mock_sdk_client.subscription_id = 'sub1'
+        
+        # Mock parse_resource_id for subnet
+        def parse_side_effect(resource_id):
+            if 'subnets' in resource_id:
+                return {
+                    'subscription_id': 'sub1',
+                    'resource_group': 'rg1',
+                    'parent_name': 'vnet1',
+                    'resource_name': 'subnet1'
+                }
+            else:  # route table
+                return {
+                    'subscription_id': 'sub1',
+                    'resource_group': 'rg1',
+                    'resource_name': 'rt1'
+                }
+        
+        self.mock_sdk_client.parse_resource_id.side_effect = parse_side_effect
+        
+        # Mock subnet object
+        mock_subnet = Mock()
+        mock_subnet.route_table = Mock()
+        mock_subnet.route_table.id = "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/routeTables/rt1"
+        mock_subnet.as_dict.return_value = {
             "name": "subnet1",
             "routeTable": {
                 "id": "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/routeTables/rt1"
             }
         }
         
-        # Mock route table response
-        mock_route_table_data = {
+        # Mock route objects
+        mock_route1 = Mock()
+        mock_route1.name = "default-to-firewall"
+        mock_route1.address_prefix = "0.0.0.0/0"
+        mock_route1.next_hop_type = "VirtualAppliance"
+        mock_route1.next_hop_ip_address = "10.1.0.4"
+        mock_route1.provisioning_state = "Succeeded"
+        mock_route1.as_dict.return_value = {
+            "name": "default-to-firewall",
+            "addressPrefix": "0.0.0.0/0",
+            "nextHopType": "VirtualAppliance",
+            "nextHopIpAddress": "10.1.0.4",
+            "provisioningState": "Succeeded"
+        }
+        
+        mock_route2 = Mock()
+        mock_route2.name = "private-network"
+        mock_route2.address_prefix = "10.0.0.0/8"
+        mock_route2.next_hop_type = "VirtualAppliance"
+        mock_route2.next_hop_ip_address = "10.1.0.4"
+        mock_route2.provisioning_state = "Succeeded"
+        mock_route2.as_dict.return_value = {
+            "name": "private-network",
+            "addressPrefix": "10.0.0.0/8",
+            "nextHopType": "VirtualAppliance",
+            "nextHopIpAddress": "10.1.0.4",
+            "provisioningState": "Succeeded"
+        }
+        
+        # Mock route table object
+        mock_route_table = Mock()
+        mock_route_table.name = "rt1"
+        mock_route_table.disable_bgp_route_propagation = False
+        mock_route_table.routes = [mock_route1, mock_route2]
+        mock_route_table.as_dict.return_value = {
             "name": "rt1",
             "disableBgpRoutePropagation": False,
             "routes": [
-                {
-                    "name": "default-to-firewall",
-                    "addressPrefix": "0.0.0.0/0",
-                    "nextHopType": "VirtualAppliance",
-                    "nextHopIpAddress": "10.1.0.4",
-                    "provisioningState": "Succeeded"
-                },
-                {
-                    "name": "private-network",
-                    "addressPrefix": "10.0.0.0/8",
-                    "nextHopType": "VirtualAppliance",
-                    "nextHopIpAddress": "10.1.0.4",
-                    "provisioningState": "Succeeded"
-                }
+                mock_route1.as_dict.return_value,
+                mock_route2.as_dict.return_value
             ]
         }
         
-        # Setup mock to return different responses
-        self.mock_azure_cli.execute.side_effect = [mock_subnet_data, mock_route_table_data]
+        self.mock_sdk_client.network_client.subnets.get.return_value = mock_subnet
+        self.mock_sdk_client.network_client.route_tables.get.return_value = mock_route_table
         
         result = self.analyzer.analyze()
         
@@ -392,8 +497,19 @@ class TestRouteTableAnalyzer(unittest.TestCase):
     
     def test_analyze_error_handling(self):
         """Test error handling during analysis"""
+        # Mock subscription ID check
+        self.mock_sdk_client.subscription_id = 'sub1'
+        
+        # Mock parse_resource_id
+        self.mock_sdk_client.parse_resource_id.return_value = {
+            'subscription_id': 'sub1',
+            'resource_group': 'rg1',
+            'parent_name': 'vnet1',
+            'resource_name': 'subnet1'
+        }
+        
         # Mock exception during subnet retrieval
-        self.mock_azure_cli.execute.side_effect = Exception("Network error")
+        self.mock_sdk_client.network_client.subnets.get.side_effect = Exception("Network error")
         
         # Should not raise exception, just log and continue
         result = self.analyzer.analyze()
