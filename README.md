@@ -47,25 +47,38 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 
 Download and run the pre-built `.pyz` file from [Releases](https://github.com/sturrent/aks-net-diagnostics/releases):
 
+**Step 1: Install Azure SDK dependencies**
+
+> ⚠️ **IMPORTANT**: The `.pyz` file contains only the tool code (~58 KB). You must install Azure SDK packages separately.
+
+```bash
+# Install required Azure SDK packages (one-time setup)
+pip install azure-identity azure-mgmt-containerservice azure-mgmt-network \
+            azure-mgmt-compute azure-mgmt-privatedns azure-mgmt-resource
+```
+
+**Step 2: Download the tool**
+
 ```bash
 # Download the latest release
 wget https://github.com/sturrent/aks-net-diagnostics/releases/latest/download/aks-net-diagnostics.pyz
+chmod +x aks-net-diagnostics.pyz
 ```
 
-```bash
-# Run directly with Python
-python aks-net-diagnostics.pyz -n myCluster -g myResourceGroup
+**Step 3: Run the tool**
 
-# Or make it executable (Linux/macOS)
-chmod +x aks-net-diagnostics.pyz
+```bash
+# Verify installation
+./aks-net-diagnostics.pyz --version
+
+# Run diagnostic
 ./aks-net-diagnostics.pyz -n myCluster -g myResourceGroup
 ```
 
-**Advantages:**
-- Single file (~57 KB)
-- No installation required
-- Just download and run
-- All modules bundled inside
+**Why separate installation?**
+- `.pyz` file stays small (~58 KB) for easy distribution
+- Azure SDK packages (~50-100 MB) are managed by your Python environment
+- Standard Python packaging practice (like any pip package)
 
 ### Option 2: Clone Repository (For Development/Customization)
 
@@ -473,12 +486,30 @@ If connectivity tests timeout:
 
 **Module import errors**
 
+If you see `ModuleNotFoundError: No module named 'azure.mgmt.containerservice'`:
+
+> ⚠️ **The .pyz file does NOT include Azure SDK packages**. You must install them separately.
+
+```bash
+# Install Azure SDK dependencies (required for v2.0.0+)
+pip install azure-identity azure-mgmt-containerservice azure-mgmt-network \
+            azure-mgmt-compute azure-mgmt-privatedns azure-mgmt-resource
+
+# Verify installation
+python -c "import azure.mgmt.containerservice; print('SDK installed ✓')"
+
+# Then run the tool
+./aks-net-diagnostics.pyz --version
+```
+
+**For repository clone:**
+
 ```bash
 # Ensure you're in the project directory
 cd aks-net-diagnostics
 
-# Install any missing dependencies
-pip install -r requirements.txt  # if requirements.txt exists
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ### Getting Help
