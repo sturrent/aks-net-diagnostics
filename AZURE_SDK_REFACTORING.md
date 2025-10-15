@@ -745,13 +745,183 @@ except HttpResponseError as e:
 
 ---
 
-## Questions to Resolve
+## Questions Resolved
 
-1. Should we maintain backward compatibility with Azure CLI execution?
-2. What authentication methods must be supported for Azure CLI integration?
-3. Are there Azure CLI specific APIs we need to use?
-4. What's the Azure CLI extension development workflow?
-5. Do we need to support offline/disconnected scenarios?
+Based on Azure CLI architecture analysis (see `AZURE_CLI_ARCHITECTURE.md`):
+
+### 1. Should we maintain backward compatibility with Azure CLI execution?
+
+**Answer: NO** - Not necessary for Azure CLI integration.
+
+**Reasoning:**
+- Azure CLI commands themselves use SDK directly, not subprocess
+- Once integrated as `az aks net-diagnostics`, it will be part of Azure CLI
+- For standalone use, users can continue using the current release (v1.1.0)
+- Clean break allows for simpler, more maintainable code
+
+**Decision:** Focus solely on SDK-based implementation. Keep the subprocess-based version in `main` branch for standalone tool usage.
+
+---
+
+### 2. What authentication methods must be supported for Azure CLI integration?
+
+**Answer: `DefaultAzureCredential` is sufficient** - Azure CLI uses this internally.
+
+**Supported authentication methods (via DefaultAzureCredential):**
+1. **Environment Variables** - `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`
+2. **Managed Identity** - For Azure VMs, App Service, Functions, etc.
+3. **Azure CLI Credential** - Uses `az login` tokens (fallback mechanism)
+4. **Interactive Browser** - For interactive scenarios
+5. **Service Principal** - For automation/CI/CD
+
+**From Azure CLI code:**
+```python
+# From: src/azure-cli-core/azure/cli/core/commands/client_factory.py
+def get_mgmt_service_client(cli_ctx, client_or_resource_type, 
+                           credential=None, **kwargs):
+    # Uses DefaultAzureCredential if credential not specified
+    # Same pattern we'll use
+```
+
+**Decision:** Use `DefaultAzureCredential()` - same as Azure CLI. No custom auth logic needed.
+
+---
+
+### 3. Are there Azure CLI specific APIs we need to use?
+
+**Answer: YES, for command registration** - But NOT for SDK operations.
+
+**What we need from Azure CLI:**
+
+#### For Command Registration (when integrating):
+```python
+# From: src/azure-cli/azure/cli/command_modules/acs/commands.py
+from azure.cli.core.commands import CliCommandType
+
+# Command registration
+with self.command_group('aks', managed_clusters_sdk,
+                       client_factory=cf_managed_clusters) as g:
+    g.custom_command('net-diagnostics', 'aks_net_diagnostics')
+```
+
+#### For Client Factory:
+```python
+# From: src/azure-cli/azure/cli/command_modules/acs/_client_factory.py
+from azure.cli.core.commands.client_factory import get_mgmt_service_client
+from azure.cli.core.profiles import ResourceType
+
+def cf_aks_diagnostics(cli_ctx, *_):
+    # Will create our SDK clients here
+    return AzureSDKClient(...)
+```
+
+**What we DON'T need:**
+- ❌ No special APIs for SDK operations (use SDK directly)
+- ❌ No Azure CLI-specific networking libraries
+- ❌ No custom authentication (DefaultAzureCredential works)
+
+**Decision:** 
+- **Now (standalone refactoring):** Build with pure SDK, no Azure CLI dependencies
+- **Later (integration):** Add minimal Azure CLI command registration code (commands.py, _client_factory.py)
+
+---
+
+### 4. What's the Azure CLI extension development workflow?
+
+**Answer: Standard extension pattern** - Well documented by Microsoft.
+
+#### Development Workflow:
+
+**Option A: Built-in Command (Recommended for AKS)**
+1. Fork Azure CLI repository: `https://github.com/Azure/azure-cli`
+2. Create new command in existing module: `src/azure-cli/azure/cli/command_modules/acs/`
+3. Add files:
+   - `_client_factory.py` - Client creation
+   - `commands.py` - Command registration  
+   - `custom.py` - Command implementation
+   - `_help.py` - Help text
+4. Test locally: `azdev test aks`
+5. Submit PR to Azure CLI repo
+
+**Option B: Extension (Alternative)**
+1. Use Azure CLI extension template
+2. Develop as separate package
+3. Users install: `az extension add --name aks-net-diagnostics`
+4. Published to extensions index
+
+**File Structure (Built-in):**
+```
+src/azure-cli/azure/cli/command_modules/acs/
+├── __init__.py
+├── commands.py              # Register 'net-diagnostics' command
+├── _client_factory.py       # Create AzureSDKClient
+├── custom.py                # Add aks_net_diagnostics() function
+├── _help.py                 # Help text
+└── net_diagnostics/         # Our refactored modules
+    ├── __init__.py
+    ├── azure_sdk_client.py
+    ├── cluster_data_collector.py
+    └── ...
+```
+
+**References:**
+- Azure CLI Dev Guide: https://github.com/Azure/azure-cli/blob/dev/doc/authoring_command_modules/README.md
+- Extension Guide: https://github.com/Azure/azure-cli/blob/dev/doc/extensions/authoring.md
+
+**Decision:** Target **built-in command** approach (Option A) since this is core AKS functionality.
+
+---
+
+### 5. Do we need to support offline/disconnected scenarios?
+
+**Answer: NO** - Not required for Azure CLI integration.
+
+**Reasoning:**
+- Azure CLI commands require Azure API connectivity
+- Our tool analyzes live Azure resources (AKS clusters, VNets, NSGs, etc.)
+- Cannot perform analysis without access to Azure Resource Manager APIs
+- Offline scenarios would require:
+  - Pre-downloaded resource data
+  - Different architecture (import/export model)
+  - Not aligned with Azure CLI command pattern
+
+**From Azure CLI:**
+```python
+# All Azure CLI commands require connectivity
+# Example: az aks show ALWAYS calls Azure API
+def aks_show(cmd, client, resource_group_name, name):
+    mc = client.get(resource_group_name, name)  # Live API call
+    return mc
+```
+
+**Potential Future Enhancement (out of scope):**
+- Export diagnostics data: `az aks net-diagnostics export > data.json`
+- Analyze exported data: `az aks net-diagnostics analyze --file data.json`
+- This would be a separate feature, not for initial integration
+
+**Decision:** Require live Azure connectivity. No offline mode needed for v1.
+
+---
+
+## Summary of Decisions
+
+| Question | Answer | Impact on Implementation |
+|----------|--------|-------------------------|
+| Backward compatibility? | ❌ No | Clean SDK-only implementation |
+| Authentication methods? | ✅ `DefaultAzureCredential` | No custom auth code needed |
+| Azure CLI specific APIs? | ✅ Only for command registration | Pure SDK for operations, CLI integration layer later |
+| Extension workflow? | ✅ Built-in command | Fork azure-cli, add to AKS module |
+| Offline support? | ❌ Not required | Require live Azure API access |
+
+---
+
+## Questions Remaining
+
+1. **Performance benchmarking:** Should we measure SDK performance vs. current subprocess approach?
+2. **API version pinning:** Which Azure SDK API versions should we target?
+3. **Error message format:** Should we match Azure CLI error message format exactly?
+4. **Telemetry:** Do we need to add Azure CLI telemetry hooks?
+5. **Testing in Azure CLI:** How do we run the Azure CLI test suite with our changes?
 
 ---
 
