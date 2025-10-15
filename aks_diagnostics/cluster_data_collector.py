@@ -11,6 +11,7 @@ import re
 from typing import Dict, List, Any, Optional
 import logging
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
+from .azure_sdk_client import normalize_dict_keys
 
 
 class ClusterDataCollector:
@@ -49,8 +50,9 @@ class ClusterDataCollector:
             # Get cluster info using SDK (replaces: az aks show)
             cluster = self.sdk_client.get_cluster(resource_group, cluster_name)
             
-            # Convert SDK object to dictionary (for compatibility with existing code)
-            cluster_result = cluster.as_dict()
+            # Convert SDK object to dictionary and normalize keys to camelCase
+            # (SDK uses snake_case, but existing code expects Azure CLI's camelCase)
+            cluster_result = normalize_dict_keys(cluster.as_dict())
             
         except ResourceNotFoundError:
             raise ValueError(
@@ -74,8 +76,8 @@ class ClusterDataCollector:
                 self.sdk_client.aks_client.agent_pools.list(resource_group, cluster_name)
             )
             
-            # Convert SDK objects to dictionaries
-            agent_pools = [pool.as_dict() for pool in agent_pools_list]
+            # Convert SDK objects to dictionaries and normalize keys to camelCase
+            agent_pools = [normalize_dict_keys(pool.as_dict()) for pool in agent_pools_list]
             
         except (ResourceNotFoundError, HttpResponseError) as e:
             self.logger.warning(f"Failed to retrieve agent pools: {e}")
@@ -202,8 +204,8 @@ class ClusterDataCollector:
                     mc_rg, vmss_name
                 )
                 
-                # Convert to dictionary for compatibility with existing code
-                vmss_detail_dict = vmss_detail.as_dict()
+                # Convert to dictionary and normalize keys to camelCase for compatibility
+                vmss_detail_dict = normalize_dict_keys(vmss_detail.as_dict())
                 
                 network_profile = vmss_detail_dict.get('virtualMachineProfile', {}).get('networkProfile', {})
                 network_interfaces = network_profile.get('networkInterfaceConfigurations', [])

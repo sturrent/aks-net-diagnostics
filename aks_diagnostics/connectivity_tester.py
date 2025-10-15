@@ -364,8 +364,9 @@ class ConnectivityTester:
             # Wait for completion (with 300 second timeout, same as Azure CLI version)
             response = async_operation.result(timeout=300)
             
-            # Convert response to dictionary for compatibility
-            response_dict = response.as_dict() if response else None
+            # Convert response to dictionary and normalize keys to camelCase for compatibility
+            from .azure_sdk_client import normalize_dict_keys
+            response_dict = normalize_dict_keys(response.as_dict()) if response else None
             result = self._analyze_test_result(test, response_dict, result)
             
         except (ResourceNotFoundError, HttpResponseError) as e:

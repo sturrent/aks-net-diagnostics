@@ -258,7 +258,7 @@ EXAMPLES:
         analyzer = OutboundConnectivityAnalyzer(
             cluster_info=self.cluster_info,
             agent_pools=self.agent_pools,
-            azure_cli=self.azure_sdk_client,
+            azure_sdk_client=self.azure_sdk_client,
             logger=self.logger
         )
         
@@ -282,7 +282,7 @@ EXAMPLES:
         try:
             # Create NSG analyzer instance with the new modular component
             nsg_analyzer = NSGAnalyzer(
-                azure_cli=self.azure_sdk_client,
+                azure_sdk_client=self.azure_sdk_client,
                 cluster_info=self.cluster_info,
                 vmss_info=self.vmss_analysis
             )
@@ -325,7 +325,7 @@ EXAMPLES:
             # Create DNS analyzer instance with Azure SDK client
             dns_analyzer = DNSAnalyzer(
                 cluster_info=self.cluster_info,
-                azure_cli=self.azure_sdk_client
+                azure_sdk_client=self.azure_sdk_client
             )
             
             # Run analysis

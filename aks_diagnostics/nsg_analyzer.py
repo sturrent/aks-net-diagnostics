@@ -193,8 +193,9 @@ class NSGAnalyzer(BaseAnalyzer):
                             )
                             
                             if nsg_details:
-                                # Convert to dictionary for compatibility
-                                nsg_dict = nsg_details.as_dict()
+                                # Convert to dictionary and normalize keys to camelCase for compatibility
+                                from .azure_sdk_client import normalize_dict_keys
+                                nsg_dict = normalize_dict_keys(nsg_details.as_dict())
                                 
                                 self.nsg_analysis["subnetNsgs"].append({
                                     "subnetId": subnet_id,
@@ -242,8 +243,9 @@ class NSGAnalyzer(BaseAnalyzer):
                         )
                         
                         if nsg_details:
-                            # Convert to dictionary for compatibility
-                            nsg_dict = nsg_details.as_dict()
+                            # Convert to dictionary and normalize keys to camelCase for compatibility
+                            from .azure_sdk_client import normalize_dict_keys
+                            nsg_dict = normalize_dict_keys(nsg_details.as_dict())
                             
                             self.nsg_analysis["nicNsgs"].append({
                                 "vmssName": vmss_name,
@@ -251,7 +253,7 @@ class NSGAnalyzer(BaseAnalyzer):
                                 "nsgId": nsg_id,
                                 "nsgName": nsg_name,
                                 "rules": nsg_dict.get('securityRules', []),
-                                "defaultRules": nsg_details.get('defaultSecurityRules', [])
+                                "defaultRules": nsg_dict.get('defaultSecurityRules', [])
                             })
                             
                             self.logger.info(f"  Found NSG on VMSS {vmss_name} NIC: {nsg_name}")

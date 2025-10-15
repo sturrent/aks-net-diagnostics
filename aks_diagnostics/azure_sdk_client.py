@@ -18,6 +18,33 @@ from azure.mgmt.privatedns import PrivateDnsManagementClient
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 
 
+def _snake_to_camel(snake_str: str) -> str:
+    """Convert snake_case to camelCase."""
+    components = snake_str.split('_')
+    return components[0] + ''.join(x.title() for x in components[1:])
+
+
+def normalize_dict_keys(data: Any) -> Any:
+    """
+    Recursively convert dictionary keys from snake_case to camelCase.
+    
+    Azure SDK returns objects with snake_case attributes when serialized with as_dict(),
+    but the existing codebase expects camelCase (Azure CLI JSON format).
+    
+    Args:
+        data: Dictionary, list, or primitive value to normalize
+        
+    Returns:
+        Data with normalized keys (camelCase)
+    """
+    if isinstance(data, dict):
+        return {_snake_to_camel(k): normalize_dict_keys(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [normalize_dict_keys(item) for item in data]
+    else:
+        return data
+
+
 class AzureSDKError(Exception):
     """Base exception for Azure SDK operations"""
     pass
@@ -155,8 +182,10 @@ class AzureSDKClient:
         cache_key = f"cluster_{resource_group}_{cluster_name}"
         
         # Check cache first
-        if self.cache_manager and self.cache_manager.has(cache_key):
-            return self.cache_manager.get(cache_key)
+        if self.cache_manager:
+            cached = self.cache_manager.get(cache_key)
+            if cached is not None:
+                return cached
         
         try:
             # Direct SDK call

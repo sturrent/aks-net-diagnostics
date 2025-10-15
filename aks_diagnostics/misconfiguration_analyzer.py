@@ -231,8 +231,9 @@ class MisconfigurationAnalyzer:
             for zone in zones_list:
                 zone_name = zone.name
                 if 'azmk8s.io' in zone_name and 'privatelink' in zone_name:
-                    # Convert to dict for compatibility
-                    zone_dict = zone.as_dict()
+                    # Convert to dict and normalize keys to camelCase for compatibility
+                    from .azure_sdk_client import normalize_dict_keys
+                    zone_dict = normalize_dict_keys(zone.as_dict())
                     # Parse resource group from zone ID
                     parsed = self.sdk_client.parse_resource_id(zone.id)
                     zone_dict['resourceGroup'] = parsed['resource_group']

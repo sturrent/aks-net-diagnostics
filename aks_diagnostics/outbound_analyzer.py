@@ -104,7 +104,7 @@ class OutboundConnectivityAnalyzer:
     
     def _analyze_node_subnet_udrs(self) -> Dict[str, Any]:
         """Analyze User Defined Routes on node subnets using RouteTableAnalyzer"""
-        analyzer = RouteTableAnalyzer(self.agent_pools, self.azure_cli)
+        analyzer = RouteTableAnalyzer(self.agent_pools, self.sdk_client)
         return analyzer.analyze()
     
     def _determine_effective_outbound(
@@ -447,8 +447,9 @@ class OutboundConnectivityAnalyzer:
                 resource_group, public_ip_name
             )
             
-            # Convert to dictionary for compatibility
-            return public_ip.as_dict()
+            # Convert to dictionary and normalize keys to camelCase for compatibility
+            from .azure_sdk_client import normalize_dict_keys
+            return normalize_dict_keys(public_ip.as_dict())
             
         except (ResourceNotFoundError, HttpResponseError) as e:
             self.logger.debug(f"Error getting public IP details for {public_ip_id}: {e}")
@@ -489,8 +490,9 @@ class OutboundConnectivityAnalyzer:
                 resource_group, prefix_name
             )
             
-            # Convert to dictionary for compatibility
-            return public_ip_prefix.as_dict()
+            # Convert to dictionary and normalize keys to camelCase for compatibility
+            from .azure_sdk_client import normalize_dict_keys
+            return normalize_dict_keys(public_ip_prefix.as_dict())
             
         except (ResourceNotFoundError, HttpResponseError) as e:
             self.logger.debug(f"Error getting public IP prefix details for {prefix_id}: {e}")

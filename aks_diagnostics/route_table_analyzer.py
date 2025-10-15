@@ -142,8 +142,9 @@ class RouteTableAnalyzer:
             # Get subnet details using SDK (replaces: az network vnet subnet show)
             subnet = network_client.subnets.get(resource_group, vnet_name, subnet_name)
             
-            # Convert to dictionary for compatibility
-            return subnet.as_dict()
+            # Convert to dictionary and normalize keys to camelCase for compatibility
+            from .azure_sdk_client import normalize_dict_keys
+            return normalize_dict_keys(subnet.as_dict())
             
         except (ResourceNotFoundError, HttpResponseError) as e:
             self.logger.info(f"    Error getting subnet details for {subnet_id}: {e}")
@@ -183,8 +184,9 @@ class RouteTableAnalyzer:
             # Get route table details using SDK (replaces: az network route-table show)
             route_table = network_client.route_tables.get(resource_group, route_table_name)
             
-            # Convert to dictionary for compatibility
-            route_table_info = route_table.as_dict()
+            # Convert to dictionary and normalize keys to camelCase for compatibility
+            from .azure_sdk_client import normalize_dict_keys
+            route_table_info = normalize_dict_keys(route_table.as_dict())
             
             if not route_table_info:
                 return None
