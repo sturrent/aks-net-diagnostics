@@ -29,7 +29,7 @@ from aks_diagnostics.outbound_analyzer import OutboundConnectivityAnalyzer
 from aks_diagnostics.report_generator import ReportGenerator
 from aks_diagnostics.misconfiguration_analyzer import MisconfigurationAnalyzer
 from aks_diagnostics.cluster_data_collector import ClusterDataCollector
-from aks_diagnostics.azure_cli import AzureCLIExecutor
+from aks_diagnostics.azure_sdk_client import AzureSDKClient
 from aks_diagnostics.cache import CacheManager
 from aks_diagnostics.validators import InputValidator
 from aks_diagnostics.exceptions import ValidationError
@@ -94,7 +94,7 @@ class AKSNetworkDiagnostics:
         self.logger = self._setup_logging()
         
         # Initialize modular components (will be set up after cache is enabled)
-        self.azure_cli_executor: Optional[AzureCLIExecutor] = None
+        self.azure_sdk_client: Optional[AzureSDKClient] = None
         self.cache_manager: Optional[CacheManager] = None
         self.dns_analyzer: Optional[DNSAnalyzer] = None
     
@@ -187,7 +187,7 @@ EXAMPLES:
             default_ttl=3600,
             enabled=self.cache
         )
-        self.azure_cli_executor = AzureCLIExecutor(cache_manager=self.cache_manager)
+        self.azure_sdk_client = AzureSDKClient(subscription_id=None, cache_manager=self.cache_manager)
         
         # Handle JSON output filename
         if self.json_report:
@@ -220,18 +220,29 @@ EXAMPLES:
                 subprocess.run(['az', 'account', 'set', '--subscription', self.subscription], 
                              capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS)
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
+                # Update SDK client with the subscription
+                self.azure_sdk_client = AzureSDKClient(subscription_id=self.subscription, cache_manager=self.cache_manager)
             except subprocess.CalledProcessError:
                 raise ValueError(f"Failed to set subscription: {self.subscription}")
         else:
-            # Get current subscription
-            current_sub = self.azure_cli_executor.execute(['account', 'show', '--query', 'id', '-o', 'tsv'], expect_json=False)
-            if isinstance(current_sub, str) and current_sub.strip():
-                self.subscription = current_sub.strip()
+            # Get current subscription from Azure SDK
+            from azure.mgmt.resource import SubscriptionClient
+            from azure.identity import DefaultAzureCredential
+            
+            credential = DefaultAzureCredential()
+            subscription_client = SubscriptionClient(credential)
+            subscriptions = list(subscription_client.subscriptions.list())
+            
+            if subscriptions:
+                # Get the first subscription (default)
+                self.subscription = subscriptions[0].subscription_id
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
+                # Update SDK client with the subscription
+                self.azure_sdk_client = AzureSDKClient(subscription_id=self.subscription, cache_manager=self.cache_manager)
     
     def fetch_cluster_information(self):
         """Fetch basic cluster information using ClusterDataCollector"""
-        collector = ClusterDataCollector(self.azure_cli_executor, self.logger)
+        collector = ClusterDataCollector(self.azure_sdk_client, self.logger)
         cluster_data = collector.collect_cluster_info(self.aks_name, self.aks_rg)
         
         self.cluster_info = cluster_data['cluster_info']
@@ -239,7 +250,7 @@ EXAMPLES:
     
     def analyze_vnet_configuration(self):
         """Analyze VNet configuration using ClusterDataCollector"""
-        collector = ClusterDataCollector(self.azure_cli_executor, self.logger)
+        collector = ClusterDataCollector(self.azure_sdk_client, self.logger)
         self.vnets_analysis = collector.collect_vnet_info(self.agent_pools)
     
     def analyze_outbound_connectivity(self):
@@ -247,7 +258,7 @@ EXAMPLES:
         analyzer = OutboundConnectivityAnalyzer(
             cluster_info=self.cluster_info,
             agent_pools=self.agent_pools,
-            azure_cli=self.azure_cli_executor,
+            azure_cli=self.azure_sdk_client,
             logger=self.logger
         )
         
@@ -257,11 +268,11 @@ EXAMPLES:
     
     def _analyze_node_subnet_udrs(self):
         """Analyze User Defined Routes on node subnets using RouteTableAnalyzer"""
-        analyzer = RouteTableAnalyzer(self.agent_pools, self.azure_cli_executor)
+        analyzer = RouteTableAnalyzer(self.agent_pools, self.azure_sdk_client)
         return analyzer.analyze()
     def analyze_vmss_configuration(self):
         """Analyze VMSS network configuration using ClusterDataCollector"""
-        collector = ClusterDataCollector(self.azure_cli_executor, self.logger)
+        collector = ClusterDataCollector(self.azure_sdk_client, self.logger)
         self.vmss_analysis = collector.collect_vmss_info(self.cluster_info)
     
     def analyze_nsg_configuration(self):
@@ -271,7 +282,7 @@ EXAMPLES:
         try:
             # Create NSG analyzer instance with the new modular component
             nsg_analyzer = NSGAnalyzer(
-                azure_cli=self.azure_cli_executor,
+                azure_cli=self.azure_sdk_client,
                 cluster_info=self.cluster_info,
                 vmss_info=self.vmss_analysis
             )
@@ -311,10 +322,10 @@ EXAMPLES:
         self.logger.info("Analyzing private DNS configuration...")
         
         try:
-            # Create DNS analyzer instance with Azure CLI executor
+            # Create DNS analyzer instance with Azure SDK client
             dns_analyzer = DNSAnalyzer(
                 cluster_info=self.cluster_info,
-                azure_cli=self.azure_cli_executor
+                azure_cli=self.azure_sdk_client
             )
             
             # Run analysis
@@ -363,12 +374,12 @@ EXAMPLES:
     
     def check_api_connectivity(self):
         """Check API server connectivity using ConnectivityTester module"""
-        tester = ConnectivityTester(self.cluster_info, self.azure_cli_executor, self.dns_analyzer, show_details=self.show_details)
+        tester = ConnectivityTester(self.cluster_info, self.azure_sdk_client, self.dns_analyzer, show_details=self.show_details)
         self.api_probe_results = tester.test_connectivity(enable_probes=self.probe_test)
     
     def analyze_misconfigurations(self):
         """Analyze potential misconfigurations and failures using MisconfigurationAnalyzer"""
-        analyzer = MisconfigurationAnalyzer(self.azure_cli_executor, self.logger)
+        analyzer = MisconfigurationAnalyzer(self.azure_sdk_client, self.logger)
         
         # Run analysis and get findings
         findings, cluster_stopped = analyzer.analyze(
