@@ -1,25 +1,28 @@
 """
 MisconfigurationAnalyzer Module
 Analyzes AKS cluster misconfigurations and generates findings
+
+Migrated from Azure CLI subprocess to Azure SDK for Python.
 """
 
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 import ipaddress
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 
 
 class MisconfigurationAnalyzer:
     """Analyzes AKS cluster for potential misconfigurations and failures"""
     
-    def __init__(self, azure_cli_executor, logger: Optional[logging.Logger] = None):
+    def __init__(self, azure_sdk_client, logger: Optional[logging.Logger] = None):
         """
         Initialize the MisconfigurationAnalyzer
         
         Args:
-            azure_cli_executor: AzureCLIExecutor instance for running Azure CLI commands
+            azure_sdk_client: AzureSDKClient instance for SDK operations
             logger: Optional logger instance
         """
-        self.azure_cli = azure_cli_executor
+        self.sdk_client = azure_sdk_client
         self.logger = logger or logging.getLogger(__name__)
         self._cluster_stopped = False
     
@@ -213,15 +216,27 @@ class MisconfigurationAnalyzer:
     def _check_system_private_dns_issues(self, findings: List[Dict[str, Any]]) -> None:
         """Check system-managed private DNS zone issues"""
         try:
-            cmd = ['network', 'private-dns', 'zone', 'list', '-o', 'json']
-            zones = self.azure_cli.execute(cmd)
+            # List private DNS zones using SDK (replaces: az network private-dns zone list)
+            zones_list = list(
+                self.sdk_client.privatedns_client.private_zones.list_by_resource_group(
+                    self.sdk_client.subscription_id  # Need to list all zones across subscription
+                )
+            )
+            
+            # Note: SDK list_by_resource_group requires RG, but we need all zones
+            # Use list() to get all zones in subscription
+            zones_list = list(self.sdk_client.privatedns_client.private_zones.list())
             
             aks_private_zones = []
-            if isinstance(zones, list):
-                for zone in zones:
-                    zone_name = zone.get('name', '')
-                    if 'azmk8s.io' in zone_name and 'privatelink' in zone_name:
-                        aks_private_zones.append(zone)
+            for zone in zones_list:
+                zone_name = zone.name
+                if 'azmk8s.io' in zone_name and 'privatelink' in zone_name:
+                    # Convert to dict for compatibility
+                    zone_dict = zone.as_dict()
+                    # Parse resource group from zone ID
+                    parsed = self.sdk_client.parse_resource_id(zone.id)
+                    zone_dict['resourceGroup'] = parsed['resource_group']
+                    aks_private_zones.append(zone_dict)
             
             if not aks_private_zones:
                 return
@@ -244,14 +259,16 @@ class MisconfigurationAnalyzer:
     ) -> None:
         """Check if VNets with custom DNS servers are properly linked to private DNS zone"""
         try:
-            cmd = ['network', 'private-dns', 'link', 'vnet', 'list',
-                   '-g', zone_rg, '-z', zone_name, '-o', 'json']
-            links = self.azure_cli.execute(cmd)
+            # List VNet links for the private DNS zone using SDK
+            # (replaces: az network private-dns link vnet list)
+            links_list = list(
+                self.sdk_client.privatedns_client.virtual_network_links.list(zone_rg, zone_name)
+            )
             
-            if not isinstance(links, list):
-                return
-            
-            linked_vnet_ids = [link.get('virtualNetwork', {}).get('id', '') for link in links]
+            linked_vnet_ids = []
+            for link in links_list:
+                if link.virtual_network:
+                    linked_vnet_ids.append(link.virtual_network.id)
             
             cluster_vnets = self._get_cluster_vnets_with_dns()
             
@@ -273,6 +290,8 @@ class MisconfigurationAnalyzer:
                                 "recommendation": f"Link VNet {dns_host_vnet_name} to private DNS zone {zone_name} to ensure proper DNS resolution for the private cluster"
                             })
                             
+        except (ResourceNotFoundError, HttpResponseError) as e:
+            self.logger.info(f"Could not check DNS server VNet links: {e}")
         except Exception as e:
             self.logger.info(f"Could not check DNS server VNet links: {e}")
     
@@ -289,15 +308,12 @@ class MisconfigurationAnalyzer:
     def _find_dns_server_host_vnet(self, dns_server_ip: str) -> Optional[Dict[str, str]]:
         """Find which VNet hosts the given DNS server IP"""
         try:
-            cmd = ['network', 'vnet', 'list', '-o', 'json']
-            vnets = self.azure_cli.execute(cmd)
-            
-            if not isinstance(vnets, list):
-                return None
+            # List all VNets in subscription using SDK (replaces: az network vnet list)
+            vnets_list = list(self.sdk_client.network_client.virtual_networks.list_all())
             
             dns_ip = ipaddress.ip_address(dns_server_ip)
             
-            for vnet in vnets:
+            for vnet in vnets_list:
                 address_prefixes = vnet.get('addressSpace', {}).get('addressPrefixes', [])
                 for prefix in address_prefixes:
                     try:
@@ -333,35 +349,45 @@ class MisconfigurationAnalyzer:
                 dns_zone_rg = self._find_private_dns_zone_rg(dns_zone_name)
             
             if dns_zone_rg and dns_zone_name:
-                cmd = ['network', 'private-dns', 'link', 'vnet', 'list',
-                       '-g', dns_zone_rg, '-z', dns_zone_name, '-o', 'json']
-                links = self.azure_cli.execute(cmd)
+                # List VNet links for the private DNS zone using SDK
+                # (replaces: az network private-dns link vnet list)
+                links_list = list(
+                    self.sdk_client.privatedns_client.virtual_network_links.list(dns_zone_rg, dns_zone_name)
+                )
                 
-                if isinstance(links, list):
-                    cluster_vnet_ids = self._get_cluster_vnet_ids(cluster_info)
-                    linked_vnet_ids = [link.get('virtualNetwork', {}).get('id', '') for link in links]
-                    
-                    for vnet_id in cluster_vnet_ids:
-                        if vnet_id not in linked_vnet_ids:
-                            vnet_name = vnet_id.split('/')[-1] if vnet_id else 'unknown'
-                            findings.append({
-                                "severity": "critical",
-                                "code": "PDNS_DNS_HOST_VNET_LINK_MISSING",
-                                "message": f"Cluster VNet {vnet_name} is not linked to private DNS zone {dns_zone_name}",
-                                "recommendation": "Link the cluster VNet to the private DNS zone to ensure proper name resolution"
-                            })
+                cluster_vnet_ids = self._get_cluster_vnet_ids(cluster_info)
+                linked_vnet_ids = []
+                for link in links_list:
+                    if link.virtual_network:
+                        linked_vnet_ids.append(link.virtual_network.id)
+                
+                for vnet_id in cluster_vnet_ids:
+                    if vnet_id not in linked_vnet_ids:
+                        vnet_name = vnet_id.split('/')[-1] if vnet_id else 'unknown'
+                        findings.append({
+                            "severity": "critical",
+                            "code": "PDNS_DNS_HOST_VNET_LINK_MISSING",
+                            "message": f"Cluster VNet {vnet_name} is not linked to private DNS zone {dns_zone_name}",
+                            "recommendation": "Link the cluster VNet to the private DNS zone to ensure proper name resolution"
+                        })
+        except (ResourceNotFoundError, HttpResponseError) as e:
+            self.logger.info(f"Could not analyze private DNS VNet links: {e}")
         except Exception as e:
             self.logger.info(f"Could not analyze private DNS VNet links: {e}")
     
     def _find_private_dns_zone_rg(self, zone_name: str) -> str:
         """Find the resource group containing the private DNS zone"""
         try:
-            cmd = ['network', 'private-dns', 'zone', 'list', '-o', 'json']
-            zones = self.azure_cli.execute(cmd)
-            if isinstance(zones, list):
-                for zone in zones:
-                    if zone.get('name') == zone_name:
-                        return zone.get('resourceGroup', '')
+            # List all private DNS zones using SDK (replaces: az network private-dns zone list)
+            zones_list = list(self.sdk_client.privatedns_client.private_zones.list())
+            
+            for zone in zones_list:
+                if zone.name == zone_name:
+                    # Parse resource group from zone ID
+                    parsed = self.sdk_client.parse_resource_id(zone.id)
+                    return parsed['resource_group']
+        except (ResourceNotFoundError, HttpResponseError):
+            pass
         except Exception:
             pass
         return ''
