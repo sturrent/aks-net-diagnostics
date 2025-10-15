@@ -3,25 +3,28 @@ Cluster Data Collector for AKS Network Diagnostics
 
 This module handles fetching and collecting cluster-related data from Azure,
 including cluster information, agent pools, VNets, and VMSS configurations.
+
+Migrated from Azure CLI subprocess to Azure SDK for Python.
 """
 
 import re
 from typing import Dict, List, Any, Optional
 import logging
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 
 
 class ClusterDataCollector:
-    """Collects cluster information and related Azure resources."""
+    """Collects cluster information and related Azure resources using Azure SDK."""
     
-    def __init__(self, azure_cli_executor, logger: Optional[logging.Logger] = None):
+    def __init__(self, azure_sdk_client, logger: Optional[logging.Logger] = None):
         """
         Initialize ClusterDataCollector.
         
         Args:
-            azure_cli_executor: AzureCLIExecutor instance for running Azure CLI commands
+            azure_sdk_client: AzureSDKClient instance for Azure SDK operations
             logger: Optional logger instance. If not provided, creates a default logger.
         """
-        self.azure_cli = azure_cli_executor
+        self.sdk_client = azure_sdk_client
         self.logger = logger or logging.getLogger(__name__)
     
     def collect_cluster_info(self, cluster_name: str, resource_group: str) -> Dict[str, Any]:
@@ -42,9 +45,22 @@ class ClusterDataCollector:
         """
         self.logger.info("Fetching cluster information...")
         
-        # Get cluster info
-        cluster_cmd = ['aks', 'show', '-n', cluster_name, '-g', resource_group, '-o', 'json']
-        cluster_result = self.azure_cli.execute(cluster_cmd)
+        try:
+            # Get cluster info using SDK (replaces: az aks show)
+            cluster = self.sdk_client.get_cluster(resource_group, cluster_name)
+            
+            # Convert SDK object to dictionary (for compatibility with existing code)
+            cluster_result = cluster.as_dict()
+            
+        except ResourceNotFoundError:
+            raise ValueError(
+                f"Cluster '{cluster_name}' not found in resource group '{resource_group}'. "
+                f"Please check the cluster name and resource group."
+            )
+        except HttpResponseError as e:
+            raise ValueError(
+                f"Failed to get cluster information for {cluster_name}: {e.message}"
+            )
         
         if not cluster_result or not isinstance(cluster_result, dict):
             raise ValueError(
@@ -52,12 +68,18 @@ class ClusterDataCollector:
                 f"Please check the cluster name and resource group."
             )
         
-        # Get agent pools
-        agent_pools_cmd = ['aks', 'nodepool', 'list', '-g', resource_group, 
-                          '--cluster-name', cluster_name, '-o', 'json']
-        agent_pools_result = self.azure_cli.execute(agent_pools_cmd)
-        
-        agent_pools = agent_pools_result if isinstance(agent_pools_result, list) else []
+        try:
+            # Get agent pools using SDK (replaces: az aks nodepool list)
+            agent_pools_list = list(
+                self.sdk_client.aks_client.agent_pools.list(resource_group, cluster_name)
+            )
+            
+            # Convert SDK objects to dictionaries
+            agent_pools = [pool.as_dict() for pool in agent_pools_list]
+            
+        except (ResourceNotFoundError, HttpResponseError) as e:
+            self.logger.warning(f"Failed to retrieve agent pools: {e}")
+            agent_pools = []
         
         return {
             'cluster_info': cluster_result,
@@ -105,36 +127,38 @@ class ClusterDataCollector:
             vnet_rg = subnet_id.split('/')[4]  # Resource group is at index 4 in the resource ID
             
             if vnet_name not in vnets_map:
-                # Get VNet information
-                vnet_cmd = ['network', 'vnet', 'show', '-n', vnet_name, '-g', vnet_rg, '-o', 'json']
-                vnet_info = self.azure_cli.execute(vnet_cmd)
-                
-                if vnet_info:
+                try:
+                    # Get VNet information using SDK (replaces: az network vnet show)
+                    vnet = self.sdk_client.network_client.virtual_networks.get(vnet_rg, vnet_name)
+                    
                     vnets_map[vnet_name] = {
                         "name": vnet_name,
                         "resourceGroup": vnet_rg,
-                        "id": vnet_info.get('id', ''),
-                        "addressSpace": vnet_info.get('addressSpace', {}).get('addressPrefixes', []),
+                        "id": vnet.id,
+                        "addressSpace": vnet.address_space.address_prefixes if vnet.address_space else [],
                         "subnets": [],
                         "peerings": []
                     }
                     
-                    # Get VNet peerings
-                    peering_cmd = ['network', 'vnet', 'peering', 'list', '-g', vnet_rg, 
-                                  '--vnet-name', vnet_name, '-o', 'json']
-                    peerings = self.azure_cli.execute(peering_cmd)
+                    # Get VNet peerings using SDK (replaces: az network vnet peering list)
+                    peerings_list = list(
+                        self.sdk_client.network_client.virtual_network_peerings.list(vnet_rg, vnet_name)
+                    )
                     
-                    if isinstance(peerings, list):
-                        for peering in peerings:
-                            vnets_map[vnet_name]["peerings"].append({
-                                "name": peering.get('name', ''),
-                                "remoteVirtualNetwork": peering.get('remoteVirtualNetwork', {}).get('id', ''),
-                                "peeringState": peering.get('peeringState', ''),
-                                "allowVirtualNetworkAccess": peering.get('allowVirtualNetworkAccess', False),
-                                "allowForwardedTraffic": peering.get('allowForwardedTraffic', False),
-                                "allowGatewayTransit": peering.get('allowGatewayTransit', False),
-                                "useRemoteGateways": peering.get('useRemoteGateways', False)
-                            })
+                    for peering in peerings_list:
+                        vnets_map[vnet_name]["peerings"].append({
+                            "name": peering.name,
+                            "remoteVirtualNetwork": peering.remote_virtual_network.id if peering.remote_virtual_network else '',
+                            "peeringState": peering.peering_state,
+                            "allowVirtualNetworkAccess": peering.allow_virtual_network_access,
+                            "allowForwardedTraffic": peering.allow_forwarded_traffic,
+                            "allowGatewayTransit": peering.allow_gateway_transit,
+                            "useRemoteGateways": peering.use_remote_gateways
+                        })
+                        
+                except (ResourceNotFoundError, HttpResponseError) as e:
+                    self.logger.warning(f"Failed to retrieve VNet {vnet_name}: {e}")
+                    continue
         
         return list(vnets_map.values())
     
@@ -155,27 +179,33 @@ class ClusterDataCollector:
             self.logger.warning("No managed resource group found in cluster info")
             return []
         
-        # List VMSS in the managed resource group
-        vmss_cmd = ['vmss', 'list', '-g', mc_rg, '-o', 'json']
-        vmss_list = self.azure_cli.execute(vmss_cmd)
-        
-        if not isinstance(vmss_list, list):
+        try:
+            # List VMSS in the managed resource group using SDK (replaces: az vmss list)
+            vmss_list = list(
+                self.sdk_client.compute_client.virtual_machine_scale_sets.list(mc_rg)
+            )
+        except (ResourceNotFoundError, HttpResponseError) as e:
+            self.logger.warning(f"Failed to list VMSS in {mc_rg}: {e}")
             return []
         
         vmss_analysis = []
         for vmss in vmss_list:
-            vmss_name = vmss.get('name', '')
+            vmss_name = vmss.name
             if not vmss_name:
                 continue
             
             self.logger.info(f"  - Analyzing VMSS: {vmss_name}")
             
-            # Get VMSS network profile
-            vmss_detail_cmd = ['vmss', 'show', '-n', vmss_name, '-g', mc_rg, '-o', 'json']
-            vmss_detail = self.azure_cli.execute(vmss_detail_cmd)
-            
-            if vmss_detail:
-                network_profile = vmss_detail.get('virtualMachineProfile', {}).get('networkProfile', {})
+            try:
+                # Get VMSS details using SDK (replaces: az vmss show)
+                vmss_detail = self.sdk_client.compute_client.virtual_machine_scale_sets.get(
+                    mc_rg, vmss_name
+                )
+                
+                # Convert to dictionary for compatibility with existing code
+                vmss_detail_dict = vmss_detail.as_dict()
+                
+                network_profile = vmss_detail_dict.get('virtualMachineProfile', {}).get('networkProfile', {})
                 network_interfaces = network_profile.get('networkInterfaceConfigurations', [])
                 
                 # Collect unique subnets for this VMSS
@@ -194,7 +224,11 @@ class ClusterDataCollector:
                 
                 # Store VMSS info with proper structure for NSG analyzer
                 # NSG analyzer expects the full VMSS detail with virtualMachineProfile
-                vmss_analysis.append(vmss_detail)
+                vmss_analysis.append(vmss_detail_dict)
+                
+            except (ResourceNotFoundError, HttpResponseError) as e:
+                self.logger.warning(f"Failed to get details for VMSS {vmss_name}: {e}")
+                continue
         
         return vmss_analysis
     
