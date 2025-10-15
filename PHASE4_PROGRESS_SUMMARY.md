@@ -34,6 +34,44 @@ Started Phase 4: Integration Testing with real AKS clusters to validate the Azur
 ## Integration Bugs Discovered and Fixed
 
 ### Critical Bug #1: snake_case vs camelCase Mismatch
+
+### Bug #6: Azure SDK additional_properties Not Serialized
+**Symptom**: Cluster error messages were generic instead of detailed
+
+**Root Cause**: Azure SDK's `.as_dict()` method intentionally excludes `additional_properties` by design. Cluster status error details (errordetail, provisioningError) are stored in `status.additional_properties` but were not being serialized.
+
+**Impact**:
+- Users saw generic error: `"Failed (Operation: Microsoft.ContainerService/managedClusters/stop/action)"`
+- Lost critical troubleshooting info: `"VMExtensionProvisioningError: AKS Node provisioning failed due to inability to establish outbound connectivity to mcr.microsoft.com..."`
+- Missing troubleshooting URLs and actionable error messages
+
+**Solution**: 
+```python
+# Extract additional_properties BEFORE calling .as_dict()
+if hasattr(cluster, 'status') and cluster.status:
+    if hasattr(cluster.status, 'additional_properties'):
+        status_additional = cluster.status.additional_properties or {}
+
+# Convert to dict and normalize
+cluster_result = normalize_dict_keys(cluster.as_dict())
+
+# Merge additional_properties into status field
+if status_additional:
+    cluster_result['status'].update(normalize_dict_keys(status_additional))
+```
+
+**Files Modified**:
+- `cluster_data_collector.py` lines 59-73: Added manual extraction
+- `tests/test_cluster_data_collector.py`: Updated mocks to handle status attribute
+
+**Verification**:
+- Compared JSON output with master branch (Azure CLI version)
+- Error messages now identical
+- Both versions show full VMExtensionProvisioningError with troubleshooting links
+
+---
+
+### Critical Bug #1: snake_case vs camelCase Mismatch
 **Symptom**: Tool couldn't find cluster data (node RG, outbound IPs, power state, etc.)
 
 **Root Cause**: Azure SDK returns Python objects with `snake_case` attributes (e.g., `node_resource_group`, `ip_address`) but the codebase expects `camelCase` (e.g., `nodeResourceGroup`, `ipAddress`) matching Azure CLI JSON output.
