@@ -25,7 +25,7 @@ graph TB
     
     subgraph "Data Collection Layer"
         CDC[ClusterDataCollector<br/>Data Gathering]
-        AzCLI[AzureCLIExecutor<br/>Azure CLI Execution]
+        AzSDK[AzureSDKClient<br/>Azure SDK Client]
         Cache[CacheManager<br/>Response Caching]
     end
     
@@ -53,18 +53,18 @@ graph TB
     Main --> NSG & DNS & RT & API & CT & OB
     Main --> MA --> RG
     
-    CDC --> AzCLI
-    NSG & DNS & RT & API & CT & OB --> AzCLI
+    CDC --> AzSDK
+    NSG & DNS & RT & API & CT & OB --> AzSDK
     
-    AzCLI --> Cache
-    AzCLI --> Val
+    AzSDK --> Cache
+    AzSDK --> Val
     
     NSG & DNS & RT & API & CT & OB --> Mod
     MA --> Mod
     
     style Main fill:#e1f5ff
     style CDC fill:#fff4e1
-    style AzCLI fill:#fff4e1
+    style AzSDK fill:#fff4e1
     style NSG fill:#e8f5e9
     style DNS fill:#e8f5e9
     style RT fill:#e8f5e9
@@ -82,22 +82,22 @@ sequenceDiagram
     participant User
     participant Main as Main Script
     participant CDC as ClusterDataCollector
-    participant Azure as Azure CLI
+    participant SDK as Azure SDK
     participant Analyzer as Analyzers
     participant Report as ReportGenerator
     
     User->>Main: Run diagnostic
     Main->>CDC: collect_all()
-    CDC->>Azure: Fetch cluster info
-    Azure-->>CDC: Cluster data
-    CDC->>Azure: Fetch VNet info
-    Azure-->>CDC: VNet data
-    CDC->>Azure: Fetch VMSS info
-    Azure-->>CDC: VMSS data
+    CDC->>SDK: Fetch cluster info
+    SDK-->>CDC: Cluster data
+    CDC->>SDK: Fetch VNet info
+    SDK-->>CDC: VNet data
+    CDC->>SDK: Fetch VMSS info
+    SDK-->>CDC: VMSS data
     CDC-->>Main: Complete dataset
     
     Main->>Analyzer: analyze(cluster_data)
-    Analyzer->>Azure: Query specific resources
+    Analyzer->>SDK: Query specific resources
     Azure-->>Analyzer: Resource details
     Analyzer-->>Main: Findings
     
@@ -117,28 +117,29 @@ sequenceDiagram
 - `collect_vmss_info()` - Gathers VMSS network configuration
 - `collect_all()` - One-call data gathering
 
-**Dependencies**: AzureCLIExecutor  
+**Dependencies**: AzureSDKClient  
 **Used By**: Main orchestrator
 
-#### 2. AzureCLIExecutor
-**Purpose**: Execute Azure CLI commands with caching and error handling  
+#### 2. AzureSDKClient
+**Purpose**: Azure SDK client for interacting with Azure Resource Manager  
 **Key Features**:
-- Command validation and sanitization
+- Type-safe Azure SDK API calls
+- Automatic credential management (DefaultAzureCredential)
 - Response caching for performance
-- Configurable timeouts
-- Comprehensive error handling
+- Comprehensive error handling with typed exceptions
+- Data normalization (snake_case to camelCase)
 
-**Dependencies**: CacheManager  
+**Dependencies**: CacheManager, Azure SDK packages  
 **Used By**: All analyzers, ClusterDataCollector
 
 #### 3. CacheManager
-**Purpose**: Cache Azure CLI responses to improve performance  
+**Purpose**: Cache Azure SDK responses to improve performance  
 **Key Features**:
 - In-memory caching
-- Command-based cache keys
+- Resource-based cache keys
 - Optional enable/disable
 
-**Used By**: AzureCLIExecutor
+**Used By**: AzureSDKClient
 
 ### Analysis Modules
 
@@ -263,7 +264,7 @@ sequenceDiagram
 - Resource group names
 - Subscription IDs
 - File paths
-- Azure CLI command safety
+- Azure resource names
 
 **Features**:
 - Pattern matching
@@ -277,7 +278,7 @@ sequenceDiagram
 - Common initialization
 - Finding management
 - Logger access
-- Azure CLI executor access
+- Azure SDK client access
 
 #### 14. Models
 **Purpose**: Data models and constants  
@@ -291,7 +292,7 @@ sequenceDiagram
 **Purpose**: Custom exception types  
 **Defines**:
 - `ValidationError` - Input validation failures
-- `AzureCLIError` - Azure CLI execution errors
+- `AzureSDKError` - Azure SDK execution errors
 
 ## 🔄 Data Flow
 
@@ -300,13 +301,13 @@ sequenceDiagram
 ```
 User Input → InputValidator → AKSNetworkDiagnostics.__init__
                                       ↓
-                            AzureCLIExecutor + CacheManager
+                            AzureSDKClient + CacheManager
 ```
 
 ### 2. Data Collection Phase
 
 ```
-Main Script → ClusterDataCollector → AzureCLIExecutor → Azure CLI
+Main Script → ClusterDataCollector → AzureSDKClient → Azure SDK APIs
                                               ↓
                                         CacheManager
                                               ↓
@@ -359,7 +360,7 @@ analyzer = NSGAnalyzer(
 
 ### 3. Testability
 All modules are independently testable:
-- Mock Azure CLI responses
+- Mock Azure SDK responses
 - Inject test data
 - Verify findings
 - No external dependencies in tests
@@ -480,7 +481,7 @@ self.add_finding(Finding.create_warning(
 ### Unit Tests
 - **Coverage**: 147 tests across all modules
 - **Isolation**: Each test is independent
-- **Mocking**: Azure CLI calls are mocked
+- **Mocking**: Azure SDK calls are mocked
 - **Validation**: Test both success and failure scenarios
 
 ### Test Organization
@@ -514,7 +515,7 @@ def test_component_when_condition_then_result(self):
 ## Performance Considerations
 
 ### Caching Strategy
-- **Command-based**: Cache keyed by Azure CLI command
+- **Resource-based**: Cache keyed by Azure resource identifiers
 - **Optional**: Enable with `--cache` flag
 - **In-memory**: Fast access, no disk I/O
 - **Scope**: Per-session only
@@ -526,7 +527,7 @@ def test_component_when_condition_then_result(self):
 4. **Streaming Output**: Start showing results before full analysis complete
 
 ### Current Performance
-- **Typical Run**: 30-60 seconds for full analysis
+- **Typical Run**: 15-30 seconds for full analysis (faster with SDK)
 - **With Cache**: 15-30 seconds on subsequent runs
 - **With --probe-test**: +30-60 seconds for active tests
 
@@ -538,8 +539,8 @@ def test_component_when_condition_then_result(self):
 - Command injection protection
 - Length limits enforced
 
-### Azure CLI Safety
-- Command whitelist (account, aks, network, vmss, vm)
+### Azure SDK Safety
+- Type-safe API calls
 - No destructive operations
 - Read-only access sufficient
 - Subscription context validation
