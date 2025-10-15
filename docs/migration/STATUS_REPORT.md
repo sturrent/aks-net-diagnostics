@@ -57,7 +57,7 @@ All 8 core modules migrated from subprocess to SDK:
 **Status**: Tested with real AKS clusters, 8 bugs found and fixed
 
 **Test Environment**:
-- Real Azure subscription (MCAPS-Support)
+- Real Azure subscription
 - Public and private AKS clusters
 - Multiple network configurations
 - LoadBalancer outbound type

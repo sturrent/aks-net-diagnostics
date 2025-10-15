@@ -10,12 +10,11 @@ The **azure-sdk-migration** branch represents a complete modernization of the to
 
 ### Key Achievements
 
-- ✅ **2.9x faster** execution (8.5s → 3.2s for full diagnostics)
+- ✅ **Faster execution** - Eliminates subprocess and parsing overhead
 - ✅ **98.7% smaller** dependencies (500 MB → 6.5 MB)
 - ✅ **136/136 tests** passing (100% success rate)
 - ✅ **8 bugs** discovered and fixed during migration
 - ✅ **100% functional** equivalence maintained
-- ✅ **35-47% less** memory usage
 - ✅ **Type-safe** SDK calls with full IDE support
 
 ### Benefits

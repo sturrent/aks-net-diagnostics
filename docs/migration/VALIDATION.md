@@ -10,33 +10,31 @@ This document captures the complete validation of the Azure CLI to Azure SDK mig
 
 ## 📊 Performance Validation
 
-### Execution Time Comparison
+### Expected Performance Improvements
 
-| Operation | Azure CLI | Azure SDK | Improvement |
-|-----------|-----------|-----------|-------------|
-| Get Cluster | 2.8s | 0.9s | **3.1x faster** |
-| List Clusters | 3.2s | 1.1s | **2.9x faster** |
-| Get NSG Rules | 3.5s | 1.2s | **2.9x faster** |
-| Full Diagnostic | 8.5s | 3.2s | **2.7x faster** |
+The Azure SDK implementation provides significant performance benefits over subprocess-based Azure CLI calls:
 
-**Average Performance**: **2.9x faster** (190% improvement)
+**Execution Speed**:
+- Eliminates subprocess creation overhead
+- No JSON parsing from CLI string output
+- Direct API calls via Azure SDK
+- Expected: 2-3x faster for most operations
 
-### Resource Usage
+**Resource Efficiency**:
+- Lower memory footprint (no CLI process overhead)
+- Reduced CPU usage (no shell subprocess management)
+- Minimal disk I/O (no temporary JSON files)
+- Expected: 30-50% less resource usage
 
-| Metric | Azure CLI | Azure SDK | Improvement |
-|--------|-----------|-----------|-------------|
-| **Memory** | 85 MB | 55 MB | 35% less |
-| **CPU** | 25% | 15% | 40% less |
-| **Disk I/O** | ~500 ops | ~50 ops | 90% less |
-
-### Dependencies
-
+**Dependencies**:
 | Implementation | Size | Install Time |
 |----------------|------|--------------|
 | **Azure CLI** | ~500 MB | ~5 minutes |
 | **Azure SDK** | ~6.5 MB | ~30 seconds |
 
 **Improvement**: **98.7% smaller**, **10x faster** installation
+
+> **Note**: Specific performance benchmarks vary based on environment, network latency, and Azure API response times. The SDK eliminates local processing overhead but network calls remain constant.
 
 ## ✅ Functional Validation
 
@@ -61,32 +59,28 @@ This document captures the complete validation of the Azure CLI to Azure SDK mig
 
 ### Test Scenarios
 
-#### Scenario 1: Single Cluster Diagnostic
-- **Environment**: 1 AKS cluster, 3 nodes, Azure CNI
-- **CLI**: 8.5s, 85 MB RAM
-- **SDK**: 3.2s, 55 MB RAM
-- **Result**: ✅ 2.7x faster, 35% less memory, identical output
+Functional testing validated that both implementations produce identical output:
 
-#### Scenario 2: Multi-Cluster Scan (10 clusters)
-- **Environment**: 10 clusters across 3 resource groups
-- **CLI**: 35s, 150 MB RAM
-- **SDK**: 12s, 80 MB RAM
-- **Result**: ✅ 2.9x faster, 47% less memory, all clusters matched
+#### Scenario 1: Single Cluster Diagnostic
+- **Environment**: AKS cluster with standard networking
+- **Result**: ✅ Identical output, all cluster details correctly retrieved
+
+#### Scenario 2: Multi-Cluster Scan
+- **Environment**: Multiple clusters across resource groups
+- **Result**: ✅ All clusters discovered, data matches between implementations
 
 #### Scenario 3: Complex Networking
-- **Environment**: Private cluster, 5 subnets, 23 NSG rules
-- **CLI**: 12s, 95 MB RAM
-- **SDK**: 4s, 60 MB RAM
-- **Result**: ✅ 3.0x faster, 37% less memory, all data correct
+- **Environment**: Private cluster with custom VNet, multiple subnets, NSG rules
+- **Result**: ✅ All network components retrieved, data accuracy confirmed
 
 ### Real-World Testing
 
-**Test Environment**:
-- Subscription: MCAPS-Support (canadacentral)
-- Authentication: DefaultAzureCredential
-- Clusters: Public + Private configurations
+**Test Approach**:
+- Azure subscription with real AKS clusters
+- DefaultAzureCredential authentication
+- Both public and private cluster configurations
 
-**Results**: All diagnostics working correctly with real Azure infrastructure
+**Results**: All diagnostics produce functionally equivalent output
 
 ## 🐛 Bugs Discovered & Fixed
 
@@ -128,35 +122,35 @@ This document captures the complete validation of the Azure CLI to Azure SDK mig
 ## 📈 Validation Summary
 
 ### Performance ✅
-- 2.9x faster execution
-- 35-47% less memory
-- 40% less CPU
-- 90% less disk I/O
-- 98.7% smaller dependencies
+- Eliminates subprocess overhead
+- No CLI JSON parsing overhead
+- Direct Azure SDK API calls
+- 98.7% smaller dependencies (500 MB → 6.5 MB)
+- 10x faster installation
 
 ### Functionality ✅
 - 100% functional equivalence
 - 136/136 unit tests passing
-- All integration tests passing
-- 8 bugs found and fixed
+- Integration tests passing
+- 8 bugs found and fixed during migration
 
 ### Code Quality ✅
-- 21% less code (cleaner)
-- Full type safety
-- Better error handling
-- Easier to maintain
+- Full type safety with Python type hints
+- Better error handling (typed exceptions)
+- IDE autocomplete support
+- Easier to maintain and extend
 
 ## 🏆 Conclusion
 
-The Azure SDK migration has been **thoroughly validated** and is **production-ready**:
+The Azure SDK migration has been **thoroughly validated**:
 
-- ✅ **Performance**: 3x faster with lower resource usage
+- ✅ **Performance**: Faster execution, lower resource usage
 - ✅ **Functionality**: 100% equivalent to CLI version
-- ✅ **Quality**: Better code, better errors, better types
-- ✅ **Dependencies**: 98.7% smaller installation
-- ✅ **Testing**: 144 tests passing (136 unit + 3 integration + 5 edge cases)
+- ✅ **Quality**: Type-safe, better errors, cleaner code
+- ✅ **Dependencies**: 98.7% smaller installation footprint
+- ✅ **Testing**: All unit and integration tests passing
 
-**Recommendation**: ✅ **APPROVED FOR PRODUCTION**
+**Status**: ✅ **PRODUCTION-READY**
 
 ## 🔗 Related Documentation
 
