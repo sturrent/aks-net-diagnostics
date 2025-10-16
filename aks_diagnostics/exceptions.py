@@ -8,11 +8,11 @@ class AKSDiagnosticsError(Exception):
     pass
 
 
-class AzureCLIError(AKSDiagnosticsError):
-    """Azure CLI command execution failed"""
-    def __init__(self, message: str, command: str = None, stderr: str = None):
-        self.command = command
-        self.stderr = stderr
+class AzureSDKError(AKSDiagnosticsError):
+    """Azure SDK API call failed"""
+    def __init__(self, message: str, error_code: str = None, status_code: int = None):
+        self.error_code = error_code
+        self.status_code = status_code
         super().__init__(message)
 
 
@@ -33,9 +33,4 @@ class InvalidConfigurationError(AKSDiagnosticsError):
 
 class ValidationError(AKSDiagnosticsError):
     """Input validation failed"""
-    pass
-
-
-class CacheError(AKSDiagnosticsError):
-    """Cache operation failed"""
     pass

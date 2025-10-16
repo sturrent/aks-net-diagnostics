@@ -294,8 +294,12 @@ sequenceDiagram
 #### 15. Exceptions
 **Purpose**: Custom exception types  
 **Defines**:
-- `ValidationError` - Input validation failures
-- `AzureSDKError` - Azure SDK execution errors
+- `AKSDiagnosticsError` - Base exception for all errors
+- `AzureSDKError` - Azure SDK API call failures (HTTP errors, resource not found, etc.)
+- `AzureAuthenticationError` - Authentication failures
+- `ClusterNotFoundError` - Cluster not found in subscription
+- `InvalidConfigurationError` - Invalid cluster configuration
+- `ValidationError` - Input validation failures (names, IDs, paths)
 
 ## 🔄 Data Flow
 

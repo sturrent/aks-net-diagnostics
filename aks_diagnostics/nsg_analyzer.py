@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Any, Set
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 from .base_analyzer import BaseAnalyzer
 from .models import Finding, FindingCode, Severity
-from .exceptions import AzureCLIError
+from .exceptions import AzureSDKError
 
 
 class NSGAnalyzer(BaseAnalyzer):
@@ -258,7 +258,7 @@ class NSGAnalyzer(BaseAnalyzer):
                             
                             self.logger.info(f"  Found NSG on VMSS {vmss_name} NIC: {nsg_name}")
                     
-                    except AzureCLIError as e:
+                    except (AzureSDKError, HttpResponseError) as e:
                         self.logger.error(f"  Failed to analyze NIC NSG {nsg_id}: {e}")
                 else:
                     self.logger.info(f"  No NSG found on VMSS {vmss_name} NIC")

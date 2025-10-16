@@ -16,6 +16,7 @@ from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.privatedns import PrivateDnsManagementClient
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
+from .exceptions import AzureSDKError
 
 
 def _snake_to_camel(snake_str: str) -> str:
@@ -43,11 +44,6 @@ def normalize_dict_keys(data: Any) -> Any:
         return [normalize_dict_keys(item) for item in data]
     else:
         return data
-
-
-class AzureSDKError(Exception):
-    """Base exception for Azure SDK operations"""
-    pass
 
 
 class AzureSDKClient:
