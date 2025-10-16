@@ -32,7 +32,7 @@ graph TB
         NSG[NSGAnalyzer<br/>Network Security]
         DNS[DNSAnalyzer<br/>DNS Validation]
         RT[RouteTableAnalyzer<br/>UDR Analysis]
-        API[APIServerAccessAnalyzer<br/>Access Control]
+        API[APIServerAccessAnalyzer<br/>API Server Security]
         CT[ConnectivityTester<br/>Active Probing]
         OB[OutboundConnectivityAnalyzer<br/>Egress Analysis]
     end
@@ -178,20 +178,26 @@ sequenceDiagram
 - `ROUTE_OUTBOUND_OVERRIDE` - Routes affecting outbound connectivity
 
 #### 7. APIServerAccessAnalyzer
-**Purpose**: API server access control validation  
+
+**Purpose**: API server network access security analysis  
 **Analyzes**:
-- Authorized IP ranges configuration
+
+- Authorized IP ranges configuration and security implications
 - Public vs private cluster setup
-- Outbound IP inclusion in authorized ranges
-- Client IP access validation
+- Critical UDR override detection (firewall/NVA routing)
+- Outbound IP authorization validation
+- Access model classification (private/restricted/unrestricted)
 
 **Key Finding Codes**:
+
 - `API_OUTBOUND_NOT_AUTHORIZED` - Cluster IPs not in authorized ranges
 - `API_CLIENT_NOT_AUTHORIZED` - Current client can't access API
 
 #### 8. ConnectivityTester
+
 **Purpose**: Active connectivity testing from cluster nodes  
 **Tests**:
+
 - MCR DNS resolution
 - Internet HTTPS connectivity
 - API server DNS resolution
