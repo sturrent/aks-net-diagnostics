@@ -472,7 +472,8 @@ self.add_finding(Finding.create_warning(
 ## 🧪 Testing Strategy
 
 ### Unit Tests
-- **Coverage**: 147 tests across all modules
+
+- **Coverage**: 139 tests across all modules
 - **Isolation**: Each test is independent
 - **Mocking**: Azure SDK calls are mocked
 - **Validation**: Test both success and failure scenarios
@@ -499,18 +500,6 @@ def test_component_when_condition_then_result(self):
     # Arrange
     setup_test_data()
     
-```
-```
-tests/
-├── test_api_server_analyzer.py    (22 tests)
-├── test_cache.py                  (8 tests)
-├── test_cluster_data_collector.py (14 tests)
-├── test_connectivity_tester.py    (21 tests)
-├── test_dns_analyzer.py           (18 tests)
-├── test_models.py                 (7 tests)
-├── test_nsg_analyzer.py           (22 tests)
-├── test_route_table_analyzer.py   (24 tests)
-└── test_validators.py             (11 tests)
 ```
 
 ### Test Patterns
@@ -609,7 +598,7 @@ graph TB
     Main --> CDC & NSG & DNS & RT & API & CT & OB & MA & RG
     CDC --> AzSDK
     NSG & DNS & RT & API & CT & OB --> AzSDK
-    AzCLI --> Cache & Val
+    AzSDK --> Val
     
     style Main fill:#e1f5ff
 ```
@@ -664,12 +653,14 @@ The `build_zipapp.py` script:
 ## Code Quality Metrics
 
 ### Maintainability
+
 - **Main Script**: 451 lines (focused on orchestration)
 - **Average Module**: ~300 lines (single responsibility)
-- **Test Coverage**: 147 tests
+- **Test Coverage**: 139 tests
 - **Type Coverage**: 100% (all functions have type hints)
 
 ### Code Organization
+
 - **Modules**: 16 files (clean separation)
 - **Tests**: 9 test files (comprehensive coverage)
 - **Documentation**: README, ARCHITECTURE, CONTRIBUTING
