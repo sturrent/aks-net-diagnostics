@@ -11,42 +11,6 @@ from aks_diagnostics.exceptions import ValidationError
 class TestInputValidator(unittest.TestCase):
     """Test input validation"""
     
-    def test_validate_azure_cli_command_valid(self):
-        """Test valid Azure CLI commands"""
-        valid_commands = [
-            ['aks', 'show', '-n', 'test', '-g', 'rg'],
-            ['network', 'vnet', 'list'],
-            ['account', 'show']
-        ]
-        
-        for cmd in valid_commands:
-            try:
-                InputValidator.validate_azure_cli_command(cmd)
-            except ValidationError:
-                self.fail(f"Valid command rejected: {cmd}")
-    
-    def test_validate_azure_cli_command_invalid(self):
-        """Test invalid Azure CLI commands"""
-        invalid_commands = [
-            [],  # Empty
-            ['rm', '-rf', '/'],  # Disallowed command
-            ['aks', 'show', '-n', 'test; rm -rf /'],  # Injection attempt
-            ['aks', 'show', '$(malicious)'],  # Command substitution
-        ]
-        
-        for cmd in invalid_commands:
-            with self.assertRaises(ValidationError):
-                InputValidator.validate_azure_cli_command(cmd)
-    
-    def test_validate_azure_cli_command_safe_arguments(self):
-        """Test commands with safe special characters"""
-        # Azure resource IDs should be allowed
-        cmd = ['aks', 'show', '--id', '/subscriptions/12345/resourceGroups/rg/providers/Microsoft.ContainerService/managedClusters/cluster']
-        try:
-            InputValidator.validate_azure_cli_command(cmd)
-        except ValidationError:
-            self.fail("Valid resource ID rejected")
-    
     def test_sanitize_filename_basic(self):
         """Test basic filename sanitization"""
         tests = [

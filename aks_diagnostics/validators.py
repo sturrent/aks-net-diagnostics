@@ -1,68 +1,24 @@
 """
-Input validation utilities
+Input validation utilities for AKS Network Diagnostics
+
+Provides validation for user inputs including:
+- Azure resource names (cluster names, resource groups)
+- Subscription IDs
+- File paths (prevent path traversal attacks)
+- Output filenames
 """
 
 import re
 from pathlib import Path
-from typing import List
 from .exceptions import ValidationError
 
 # Configuration constants
 MAX_FILENAME_LENGTH = 50
 MAX_RESOURCE_NAME_LENGTH = 260
-ALLOWED_AZ_COMMANDS = {
-    'account', 'aks', 'network', 'vmss', 'vm'
-}
 
 
 class InputValidator:
-    """Validates user inputs and Azure CLI commands"""
-    
-    @staticmethod
-    def validate_azure_cli_command(cmd: List[str]) -> None:
-        """
-        Validate Azure CLI command to prevent injection attacks
-        
-        Args:
-            cmd: Command as list of strings
-            
-        Raises:
-            ValidationError: If command is invalid or potentially dangerous
-        """
-        if not cmd or not isinstance(cmd, list):
-            raise ValidationError("Command must be a non-empty list")
-        
-        # Check if the first argument is an allowed command
-        if cmd[0] not in ALLOWED_AZ_COMMANDS:
-            raise ValidationError(f"Command '{cmd[0]}' is not allowed")
-        
-        # Check if this is a VMSS run-command (scripts are executed remotely, not locally)
-        is_vmss_script = ('vmss' in cmd and 'run-command' in cmd and '--scripts' in cmd)
-        
-        # Validate that arguments don't contain shell metacharacters
-        dangerous_chars = ['|', '&', ';', '(', ')', '$', '`', '\\', '"', "'", '<', '>']
-        for i, arg in enumerate(cmd):
-            if any(char in str(arg) for char in dangerous_chars):
-                # For VMSS run-command, the --scripts argument is executed remotely on the VM
-                # so it's safe to allow quotes and other characters
-                if is_vmss_script and i > 0 and cmd[i-1] == '--scripts':
-                    continue  # Skip validation for remote scripts
-                # Allow some safe characters in specific contexts
-                if not InputValidator._is_safe_argument(str(arg)):
-                    raise ValidationError(
-                        f"Command argument contains potentially dangerous characters: {arg}"
-                    )
-    
-    @staticmethod
-    def _is_safe_argument(arg: str) -> bool:
-        """Check if an argument with special characters is safe"""
-        # Allow Azure resource IDs which contain forward slashes
-        if arg.startswith('/subscriptions/'):
-            return True
-        # Allow JSON queries which might contain quotes
-        if arg.startswith('[') and arg.endswith(']'):
-            return True
-        return False
+    """Validates user inputs for security and correctness"""
     
     @staticmethod
     def sanitize_filename(filename: str) -> str:

@@ -259,19 +259,21 @@ sequenceDiagram
 ### Utility Modules
 
 #### 12. InputValidator
-**Purpose**: Validate and sanitize user inputs  
+
+**Purpose**: Validate and sanitize user inputs for security  
 **Validates**:
-- Cluster names
-- Resource group names
-- Subscription IDs
-- File paths
-- Azure resource names
+
+- Cluster names and resource group names
+- Subscription IDs (GUID format)
+- Output file paths (prevent directory traversal)
+- Filenames (prevent path traversal attacks)
 
 **Features**:
-- Pattern matching
-- Length validation
-- Security checks
+
+- Pattern matching and length validation
 - Path traversal prevention
+- Malicious input detection
+- Safe filename sanitization
 
 #### 13. BaseAnalyzer
 **Purpose**: Base class for all analyzers  
