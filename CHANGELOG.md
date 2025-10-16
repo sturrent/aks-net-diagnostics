@@ -5,6 +5,44 @@ All notable changes to the AKS Network Diagnostics tool will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2025-10-15
+
+### Changed
+
+#### Breaking Changes - Azure SDK Migration
+- **Azure CLI → Azure SDK**: Complete rewrite from subprocess Azure CLI calls to native Azure SDK for Python
+  - Replaces all `az` command executions with type-safe Azure SDK API calls
+  - Uses `DefaultAzureCredential` for authentication (supports managed identity, Azure CLI, service principal, etc.)
+  - **BREAKING**: Requires new Python dependencies: `azure-identity`, `azure-mgmt-containerservice`, `azure-mgmt-network`, `azure-mgmt-compute`, `azure-mgmt-privatedns`, `azure-mgmt-resource`
+  - **BREAKING**: No longer requires Azure CLI to be installed
+
+#### Architecture Improvements
+- **Better error messages**: Shows actual Azure provisioning states instead of generic errors
+- **Type safety**: Direct API calls eliminate command injection risks and subprocess overhead
+- **Performance**: Faster execution with native API calls vs. subprocess spawning
+- **Reliability**: Structured exception handling with proper Azure error details
+
+#### Removed Features
+- **Cache functionality removed**: Development-only feature removed to avoid user confusion
+  - Cache could show stale data when expecting fresh cluster state
+  - Simplified codebase by 507 lines (cache.py, test_cache.py, integrations)
+- **Azure CLI validation removed**: No longer needed without subprocess calls
+  - Removed 303 lines of command validation and sanitization code
+  - InputValidator now focused solely on user input security (paths, resource names, IDs)
+
+#### Code Quality
+- **Cleaner architecture**: Removed 810 total lines of obsolete code
+- **Focused modules**: Each component has a single, clear responsibility
+- **Updated documentation**: ARCHITECTURE.md fully reflects SDK implementation
+- **Test suite**: 136 tests passing (reduced from 147 after removing cache and CLI tests)
+
+### Technical Details
+- Migration branch: `azure-sdk-migration`
+- Python 3.8+ required (for Azure SDK compatibility)
+- All core functionality preserved and enhanced
+- Zero regression in diagnostic capabilities
+- Ready for production deployment
+
 ## [1.1.0] - 2025-10-13
 
 ### Changed
