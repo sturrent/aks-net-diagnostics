@@ -52,36 +52,34 @@ class AzureSDKError(Exception):
 
 class AzureSDKClient:
     """
-    Thin wrapper for Azure SDK clients with caching support.
+    Thin wrapper for Azure SDK clients.
     
     Design Philosophy:
     - Lazy initialization: Create clients only when needed
     - Property-based access: Use @property decorators (Azure CLI pattern)
     - Minimal abstraction: Expose SDK clients directly for most operations
-    - Selective helpers: Only add methods for frequently cached operations
+    - Selective helpers: Only add methods for frequently used operations
     
     Usage:
         # Create client
-        sdk_client = AzureSDKClient(subscription_id, cache_manager)
+        sdk_client = AzureSDKClient(subscription_id)
         
-        # Direct SDK access (most common pattern)
+        # Direct SDK access
         cluster = sdk_client.aks_client.managed_clusters.get(rg, name)
         vnet = sdk_client.network_client.virtual_networks.get(rg, vnet_name)
         
-        # Helper with caching (for frequently accessed resources)
+        # Helper methods for common operations
         cluster = sdk_client.get_cluster(rg, name)
     """
     
-    def __init__(self, subscription_id: str, cache_manager: Optional[Any] = None):
+    def __init__(self, subscription_id: str):
         """
         Initialize Azure SDK client wrapper.
         
         Args:
             subscription_id: Azure subscription ID
-            cache_manager: Optional CacheManager instance for caching responses
         """
         self.subscription_id = subscription_id
-        self.cache_manager = cache_manager
         
         # Use DefaultAzureCredential (same as Azure CLI)
         # Supports: Environment vars, Managed Identity, Azure CLI, Interactive, Service Principal
@@ -179,22 +177,9 @@ class AzureSDKClient:
         Raises:
             AzureSDKError: If cluster not found or API call fails
         """
-        cache_key = f"cluster_{resource_group}_{cluster_name}"
-        
-        # Check cache first
-        if self.cache_manager:
-            cached = self.cache_manager.get(cache_key)
-            if cached is not None:
-                return cached
-        
         try:
             # Direct SDK call
             cluster = self.aks_client.managed_clusters.get(resource_group, cluster_name)
-            
-            # Cache result
-            if self.cache_manager:
-                self.cache_manager.set(cache_key, cluster)
-            
             return cluster
             
         except ResourceNotFoundError:

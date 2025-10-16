@@ -26,7 +26,6 @@ graph TB
     subgraph "Data Collection Layer"
         CDC[ClusterDataCollector<br/>Data Gathering]
         AzSDK[AzureSDKClient<br/>Azure SDK Client]
-        Cache[CacheManager<br/>Response Caching]
     end
     
     subgraph "Analysis Layer"
@@ -56,7 +55,6 @@ graph TB
     CDC --> AzSDK
     NSG & DNS & RT & API & CT & OB --> AzSDK
     
-    AzSDK --> Cache
     AzSDK --> Val
     
     NSG & DNS & RT & API & CT & OB --> Mod
@@ -121,29 +119,21 @@ sequenceDiagram
 **Used By**: Main orchestrator
 
 #### 2. AzureSDKClient
+
 **Purpose**: Azure SDK client for interacting with Azure Resource Manager  
 **Key Features**:
 - Type-safe Azure SDK API calls
 - Automatic credential management (DefaultAzureCredential)
-- Response caching for performance
 - Comprehensive error handling with typed exceptions
 - Data normalization (snake_case to camelCase)
 
-**Dependencies**: CacheManager, Azure SDK packages  
+**Dependencies**: Azure SDK packages  
 **Used By**: All analyzers, ClusterDataCollector
-
-#### 3. CacheManager
-**Purpose**: Cache Azure SDK responses to improve performance  
-**Key Features**:
-- In-memory caching
-- Resource-based cache keys
-- Optional enable/disable
-
-**Used By**: AzureSDKClient
 
 ### Analysis Modules
 
-#### 4. NSGAnalyzer
+#### 3. NSGAnalyzer
+
 **Purpose**: Network Security Group validation and compliance checking  
 **Analyzes**:
 - Required AKS outbound rules (MCR, Azure Cloud, DNS, NTP)
@@ -157,9 +147,11 @@ sequenceDiagram
 - `NSG_BLOCKING_AKS_TRAFFIC` - Rules blocking required AKS traffic
 - `NSG_POTENTIAL_BLOCK` - Potentially problematic rules
 
-#### 5. DNSAnalyzer
+#### 4. DNSAnalyzer
+
 **Purpose**: DNS configuration validation for public and private clusters  
 **Analyzes**:
+
 - Azure default DNS vs custom DNS
 - Private DNS zone configuration
 - VNet links for private clusters
@@ -167,12 +159,15 @@ sequenceDiagram
 - Custom DNS server reachability
 
 **Key Finding Codes**:
+
 - `PRIVATE_DNS_MISCONFIGURED` - Custom DNS can't resolve private zones
 - `PDNS_DNS_HOST_VNET_LINK_MISSING` - Missing VNet link to DNS zone
 
-#### 6. RouteTableAnalyzer
+#### 5. RouteTableAnalyzer
+
 **Purpose**: User Defined Route (UDR) impact assessment  
 **Analyzes**:
+
 - Default route (0.0.0.0/0) presence
 - Next hop types (VirtualAppliance, VirtualNetworkGateway, Internet)
 - Impact on AKS management traffic
@@ -301,15 +296,13 @@ sequenceDiagram
 ```
 User Input → InputValidator → AKSNetworkDiagnostics.__init__
                                       ↓
-                            AzureSDKClient + CacheManager
+                                AzureSDKClient
 ```
 
 ### 2. Data Collection Phase
 
 ```
 Main Script → ClusterDataCollector → AzureSDKClient → Azure SDK APIs
-                                              ↓
-                                        CacheManager
                                               ↓
                                      Cluster Info, Pools, VNets, VMSS
 ```
@@ -485,6 +478,28 @@ self.add_finding(Finding.create_warning(
 - **Validation**: Test both success and failure scenarios
 
 ### Test Organization
+
+```
+tests/
+├── test_api_server_analyzer.py    (22 tests)
+├── test_cluster_data_collector.py (14 tests)
+├── test_connectivity_tester.py    (21 tests)
+├── test_dns_analyzer.py           (18 tests)
+├── test_models.py                 (7 tests)
+├── test_nsg_analyzer.py           (22 tests)
+├── test_route_table_analyzer.py   (24 tests)
+└── test_validators.py             (11 tests)
+```
+
+### Test Patterns
+
+```python
+def test_component_when_condition_then_result(self):
+    """Test description"""
+    # Arrange
+    setup_test_data()
+    
+```
 ```
 tests/
 ├── test_api_server_analyzer.py    (22 tests)
@@ -514,32 +529,28 @@ def test_component_when_condition_then_result(self):
 
 ## Performance Considerations
 
-### Caching Strategy
-- **Resource-based**: Cache keyed by Azure resource identifiers
-- **Optional**: Enable with `--cache` flag
-- **In-memory**: Fast access, no disk I/O
-- **Scope**: Per-session only
-
 ### Optimization Opportunities
+
 1. **Parallel Queries**: VNet, VMSS, NSG queries could run in parallel
-2. **Smart Caching**: Cache VNet info across multiple cluster analyses
-3. **Incremental Analysis**: Skip unchanged components on re-run
-4. **Streaming Output**: Start showing results before full analysis complete
+2. **Incremental Analysis**: Skip unchanged components on re-run
+3. **Streaming Output**: Start showing results before full analysis complete
 
 ### Current Performance
-- **Typical Run**: 15-30 seconds for full analysis (faster with SDK)
-- **With Cache**: 15-30 seconds on subsequent runs
+
+- **Typical Run**: 15-30 seconds for full analysis
 - **With --probe-test**: +30-60 seconds for active tests
 
 ## 🔐 Security Considerations
 
 ### Input Validation
+
 - All user inputs validated before use
 - Path traversal prevention
 - Command injection protection
 - Length limits enforced
 
 ### Azure SDK Safety
+
 - Type-safe API calls
 - No destructive operations
 - Read-only access sufficient
@@ -579,8 +590,7 @@ graph TB
         
         subgraph "aks_diagnostics/"
             CDC[cluster_data_collector.py]
-            AzCLI[azure_cli.py]
-            Cache[cache.py]
+            AzSDK[azure_sdk_client.py]
             NSG[nsg_analyzer.py]
             DNS[dns_analyzer.py]
             RT[route_table_analyzer.py]
@@ -597,8 +607,8 @@ graph TB
     end
     
     Main --> CDC & NSG & DNS & RT & API & CT & OB & MA & RG
-    CDC --> AzCLI
-    NSG & DNS & RT & API & CT & OB --> AzCLI
+    CDC --> AzSDK
+    NSG & DNS & RT & API & CT & OB --> AzSDK
     AzCLI --> Cache & Val
     
     style Main fill:#e1f5ff
