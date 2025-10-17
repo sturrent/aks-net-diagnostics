@@ -219,7 +219,7 @@ class OutboundConnectivityAnalyzer:
         description = effective_summary["description"]
 
         if effective_summary["overridden_by_udr"]:
-            self.logger.warning("  [!]  %s", description)
+            self.logger.warning("  %s", description)
             if effective_summary["load_balancer_ips"]:
                 self.logger.warning(
                     f"    Load Balancer IPs (not effective): {', '.join(effective_summary['load_balancer_ips'])}"
