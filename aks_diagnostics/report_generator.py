@@ -602,8 +602,14 @@ class ReportGenerator:
                 print(f"- [INFO] {info_count}")
             print()
 
+            # Define severity order (most severe first)
+            severity_order = {"critical": 0, "high": 1, "error": 1, "warning": 2, "info": 3}
+
+            # Sort findings by severity (most severe first)
+            sorted_findings = sorted(self.findings, key=lambda f: severity_order.get(f.get("severity", "info"), 3))
+
             # Display all findings in detail
-            for finding in self.findings:
+            for finding in sorted_findings:
                 severity_icon = {
                     "critical": "[CRITICAL]",
                     "error": "[ERROR]",

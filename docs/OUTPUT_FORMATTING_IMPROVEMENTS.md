@@ -46,7 +46,54 @@ Standardized to **word-based severity markers** throughout:
 
 ---
 
-## 2. Logger Statement Redundancy Removal
+## 2. Findings Severity Sorting
+
+### Problem
+Findings were displayed in discovery order (the order they were found during analysis), making it difficult to quickly identify the most critical issues. Users had to scan through all findings to find high-priority problems.
+
+### Solution
+Implemented severity-based sorting to display findings in order of importance:
+1. **CRITICAL** - Most severe issues (security risks, cluster failures)
+2. **HIGH/ERROR** - Significant problems requiring attention
+3. **WARNING** - Potential issues or misconfigurations
+4. **INFO** - Informational findings
+
+### Implementation
+```python
+# Define severity order (most severe first)
+severity_order = {"critical": 0, "high": 1, "error": 1, "warning": 2, "info": 3}
+
+# Sort findings by severity
+sorted_findings = sorted(
+    self.findings, key=lambda f: severity_order.get(f.get("severity", "info"), 3)
+)
+```
+
+### Files Changed
+- `aks_diagnostics/report_generator.py` (lines 603-610)
+
+### Examples
+**Before (Discovery Order):**
+```
+### [WARNING] NSG_INTER_NODE_BLOCKED
+### [CRITICAL] PRIVATE_DNS_MISCONFIGURED
+### [INFO] CLUSTER_INFO
+### [ERROR] CONNECTIVITY_DNS_FAILURE
+### [CRITICAL] CLUSTER_OPERATION_FAILURE
+```
+
+**After (Severity Order):**
+```
+### [CRITICAL] PRIVATE_DNS_MISCONFIGURED
+### [CRITICAL] CLUSTER_OPERATION_FAILURE
+### [ERROR] CONNECTIVITY_DNS_FAILURE
+### [WARNING] NSG_INTER_NODE_BLOCKED
+### [INFO] CLUSTER_INFO
+```
+
+---
+
+## 3. Logger Statement Redundancy Removal
 
 ### Problem 1: Redundant "Finding:" Prefix
 Logger statements included "Finding:" prefix which was redundant with the log level:
@@ -97,7 +144,7 @@ self.logger.info(finding.message)
 
 ---
 
-## 3. Findings Summary Simplification
+## 4. Findings Summary Simplification
 
 ### Problem 1: Redundant Severity Display
 Detailed findings showed severity twice:
@@ -148,7 +195,7 @@ Summary counts included redundant text:
 
 ---
 
-## 4. Status Message Improvements
+## 5. Status Message Improvements
 
 ### Problem
 Status messages were repetitive or unclear:
@@ -185,7 +232,7 @@ status_messages = {
 
 ---
 
-## 5. Implementation Checklist
+## 6. Implementation Checklist
 
 When applying these improvements to another branch:
 
@@ -195,7 +242,13 @@ When applying these improvements to another branch:
 - [ ] Search for `\[i\]` → Replace with `[INFO]`
 - [ ] Verify NSG rule access status still uses `[X]` (this is correct usage)
 
-### Step 2: Logger Statement Cleanup
+### Step 2: Findings Severity Sorting
+- [ ] In `report_generator.py`, add severity sorting before displaying findings:
+  - Define severity order: `{"critical": 0, "high": 1, "error": 1, "warning": 2, "info": 3}`
+  - Sort findings: `sorted(self.findings, key=lambda f: severity_order.get(f.get("severity", "info"), 3))`
+  - Display sorted findings instead of original order
+
+### Step 3: Logger Statement Cleanup
 - [ ] In `base_analyzer.py`, update `add_finding()` method:
   - Remove `f"Finding: [SEVERITY] {message}"` pattern
   - Use just `finding.message` directly
@@ -204,15 +257,15 @@ When applying these improvements to another branch:
 - [ ] Search for `logger.error(.*\[ERROR\]` → Remove `[ERROR]` from message  
 - [ ] Search for `logger.info(.*\[INFO\]` → Remove `[INFO]` from message
 
-### Step 3: Findings Display Simplification
+### Step 4: Findings Display Simplification
 - [ ] In `report_generator.py`, remove redundant severity line from detailed findings
 - [ ] Simplify count display: `f"[{severity.upper()}] {count}"` instead of `f"[{severity.upper()}] {count} {severity.title()} issue(s)"`
 
-### Step 4: Status Messages
+### Step 5: Status Messages
 - [ ] Replace `.replace('_', ' ').title()` pattern with explicit status message dictionary
 - [ ] Ensure messages are clear and descriptive (e.g., "Not blocked" instead of "Ok")
 
-### Step 5: Testing
+### Step 6: Testing
 - [ ] Run quality checks (Pylint, Flake8, Black, isort)
 - [ ] Run all unit tests
 - [ ] Build .pyz and test with real clusters
@@ -220,9 +273,9 @@ When applying these improvements to another branch:
 
 ---
 
-## 6. Git Commits Reference
+## 7. Git Commits Reference
 
-The changes were implemented across 6 commits:
+The changes were implemented across 7 commits:
 
 1. **dd60ad9** - "Bump version to 1.1.2 and ensure consistency across all files"
 2. **e9a539d** - "Standardize output formatting: use [WARNING] instead of [!] for consistency"
@@ -230,10 +283,11 @@ The changes were implemented across 6 commits:
 4. **79028d0** - "Remove redundant text from findings summary - show only severity and count"
 5. **caf8ffd** - "Standardize logger severity markers across all analyzers"
 6. **15f9691** - "Remove redundant text from logger and status messages"
+7. **[NEW]** - "Sort findings by severity in detailed output"
 
 ---
 
-## 7. Files Affected Summary
+## 8. Files Affected Summary
 
 ### Core Analyzers
 - `aks_diagnostics/base_analyzer.py` - Logger statement cleanup
@@ -242,11 +296,11 @@ The changes were implemented across 6 commits:
 - `aks_diagnostics/outbound_analyzer.py` - Logger statement cleanup
 
 ### Report Generation
-- `aks_diagnostics/report_generator.py` - All formatting improvements (severity markers, counts, status messages)
+- `aks_diagnostics/report_generator.py` - All formatting improvements (severity markers, severity sorting, counts, status messages)
 
 ---
 
-## 8. Key Principles
+## 9. Key Principles
 
 1. **Avoid Redundancy**: Don't repeat information that's already conveyed by context
 2. **Be Concise**: Show only essential information
@@ -256,7 +310,7 @@ The changes were implemented across 6 commits:
 
 ---
 
-## 9. Testing Evidence
+## 10. Testing Evidence
 
 All changes were validated with:
 - **Quality Checks**: Pylint 9.96/10, Flake8 0 violations, Black/isort compliant
@@ -266,7 +320,7 @@ All changes were validated with:
 
 ---
 
-## 10. Before/After Complete Example
+## 11. Before/After Complete Example
 
 ### Before (Mixed Formatting)
 ```
