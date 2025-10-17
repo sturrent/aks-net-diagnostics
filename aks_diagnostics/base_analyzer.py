@@ -39,13 +39,13 @@ class BaseAnalyzer(ABC):
     def add_finding(self, finding: Finding):
         """Add a finding to the results"""
         self.findings.append(finding)
-        # Map severity to appropriate log level and symbol
+        # Map severity to appropriate log level (no need for severity marker - log level shows it)
         if finding.severity.value in ["critical", "error"]:
-            self.logger.error(f"Finding: [ERROR] {finding.message}")
+            self.logger.error(finding.message)
         elif finding.severity.value == "warning":
-            self.logger.warning(f"Finding: [WARNING] {finding.message}")
+            self.logger.warning(finding.message)
         else:
-            self.logger.info(f"Finding: [INFO] {finding.message}")
+            self.logger.info(finding.message)
 
     def get_findings(self) -> List[Finding]:
         """Get all findings from this analyzer"""

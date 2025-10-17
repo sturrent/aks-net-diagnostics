@@ -479,10 +479,17 @@ class ReportGenerator:
             print(f"- **Issues Found:** {len(blocking_rules)}")
 
             # Inter-node communication status
+            status_messages = {
+                "ok": "Not blocked",
+                "potential_issues": "Potential issues",
+                "blocked": "Blocked",
+                "unknown": "Unknown",
+            }
             status_icon = {"ok": "[OK]", "potential_issues": "[WARNING]", "blocked": "[ERROR]", "unknown": "[?]"}.get(
                 inter_node_status, "[?]"
             )
-            print(f"- **Inter-node Communication:** {status_icon} {inter_node_status.replace('_', ' ').title()}")
+            status_text = status_messages.get(inter_node_status, "Unknown")
+            print(f"- **Inter-node Communication:** {status_icon} {status_text}")
 
             # Show detailed NSG information
             if total_nsgs > 0:
