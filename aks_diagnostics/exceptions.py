@@ -6,8 +6,6 @@ Custom exceptions for standardized error handling
 class AKSDiagnosticsError(Exception):
     """Base exception for AKS diagnostics"""
 
-    pass
-
 
 class AzureCLIError(AKSDiagnosticsError):
     """Azure CLI command execution failed"""
@@ -21,28 +19,18 @@ class AzureCLIError(AKSDiagnosticsError):
 class AzureAuthenticationError(AKSDiagnosticsError):
     """Azure authentication failed"""
 
-    pass
-
 
 class ClusterNotFoundError(AKSDiagnosticsError):
     """AKS cluster not found"""
-
-    pass
 
 
 class InvalidConfigurationError(AKSDiagnosticsError):
     """Invalid configuration provided"""
 
-    pass
-
 
 class ValidationError(AKSDiagnosticsError):
     """Input validation failed"""
 
-    pass
-
 
 class CacheError(AKSDiagnosticsError):
     """Cache operation failed"""
-
-    pass

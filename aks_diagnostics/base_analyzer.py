@@ -34,7 +34,7 @@ class BaseAnalyzer(ABC):
         Returns:
             Analysis results as dictionary
         """
-        pass
+        raise NotImplementedError("Subclasses must implement analyze()")
 
     def add_finding(self, finding: Finding):
         """Add a finding to the results"""

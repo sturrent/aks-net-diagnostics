@@ -392,8 +392,7 @@ class MisconfigurationAnalyzer:
 
     def _analyze_vnet_issues(self, vmss_analysis: List[Dict[str, Any]], findings: List[Dict[str, Any]]) -> None:
         """Analyze VNet configuration issues"""
-        # Placeholder for future VNet subnet capacity analysis
-        pass
+        # TODO: Implement VNet subnet capacity analysis
 
     def _analyze_udr_issues(self, outbound_analysis: Dict[str, Any], findings: List[Dict[str, Any]]) -> None:
         """Analyze User Defined Route configuration issues"""
