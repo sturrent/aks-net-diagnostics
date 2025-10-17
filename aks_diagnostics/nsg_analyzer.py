@@ -149,7 +149,7 @@ class NSGAnalyzer(BaseAnalyzer):
         processed_subnets: Set[str] = set()
 
         for vmss in self.vmss_info:
-            vmss_name = vmss.get("name", "unknown")
+            _vmss_name = vmss.get("name", "unknown")  # noqa: F841
             vm_profile = vmss.get("virtualMachineProfile", {})
             network_profile = vm_profile.get("networkProfile", {})
             network_interfaces = network_profile.get("networkInterfaceConfigurations", [])

@@ -11,7 +11,7 @@ Tests cover:
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from aks_diagnostics.route_table_analyzer import RouteTableAnalyzer
 

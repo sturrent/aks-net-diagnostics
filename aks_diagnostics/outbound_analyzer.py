@@ -129,7 +129,7 @@ class OutboundConnectivityAnalyzer:
 
         # Check if UDRs override the configured outbound type
         virtual_appliance_routes = udr_analysis.get("virtualApplianceRoutes", [])
-        internet_routes = udr_analysis.get("internetRoutes", [])
+        _internet_routes = udr_analysis.get("internetRoutes", [])  # noqa: F841
 
         # Look for default routes (0.0.0.0/0) that redirect traffic
         default_route_to_appliance = None
@@ -419,13 +419,13 @@ class OutboundConnectivityAnalyzer:
                                 import ipaddress
 
                                 network = ipaddress.ip_network(ip_prefix, strict=False)
-                                first_ip = (
+                                _first_ip = (  # noqa: F841
                                     str(list(network.hosts())[0])
                                     if list(network.hosts())
                                     else str(network.network_address)
                                 )
                                 self.outbound_ips.append(f"{ip_prefix} (range)")
-                            except:
+                            except Exception:
                                 self.outbound_ips.append(f"{ip_prefix} (prefix)")
 
         if not self.outbound_ips and show_details:

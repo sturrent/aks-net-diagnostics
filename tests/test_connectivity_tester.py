@@ -3,7 +3,7 @@ Unit tests for Connectivity Tester
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from aks_diagnostics.connectivity_tester import ConnectivityTester, VMSSInstance
 

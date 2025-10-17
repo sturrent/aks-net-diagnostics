@@ -254,7 +254,7 @@ class MisconfigurationAnalyzer:
             cluster_vnets = self._get_cluster_vnets_with_dns()
 
             for vnet_info in cluster_vnets:
-                vnet_id = vnet_info.get("id", "")
+                _vnet_id = vnet_info.get("id", "")  # noqa: F841
                 vnet_name = vnet_info.get("name", "")
                 dns_servers = vnet_info.get("dnsServers", [])
 
@@ -491,7 +491,7 @@ class MisconfigurationAnalyzer:
                     )
 
         route_tables = udr_analysis.get("routeTables", [])
-        bgp_disabled_tables = [rt for rt in route_tables if rt.get("disableBgpRoutePropagation") == True]
+        bgp_disabled_tables = [rt for rt in route_tables if rt.get("disableBgpRoutePropagation")]
         if bgp_disabled_tables:
             table_names = [rt.get("name", "unnamed") for rt in bgp_disabled_tables]
             findings.append(
@@ -561,7 +561,7 @@ class MisconfigurationAnalyzer:
             findings.append({"severity": severity, "code": code, "message": message, "recommendation": recommendation})
 
         authorized_ranges = api_server_access_analysis.get("authorizedIpRanges", [])
-        is_private = api_server_access_analysis.get("privateCluster", False)
+        _is_private = api_server_access_analysis.get("privateCluster", False)  # noqa: F841
         access_model = api_server_access_analysis.get("accessRestrictions", {}).get("model", "unknown")
 
         if access_model == "unrestricted_public" and not security_findings:

@@ -94,10 +94,8 @@ class TestClusterDataCollector(unittest.TestCase):
         self.assertEqual(result, [])
         self.mock_logger.info.assert_called()
         # Verify the log message about AKS-managed VNet
-        from unittest.mock import call
-
-        log_calls = [str(call) for call in self.mock_logger.info.call_args_list]
-        self.assertTrue(any("AKS-managed VNet" in str(call) for call in log_calls))
+        log_calls = [str(c) for c in self.mock_logger.info.call_args_list]
+        self.assertTrue(any("AKS-managed VNet" in str(c) for c in log_calls))
 
     def test_collect_vnet_info_with_subnets(self):
         """Test VNet collection with custom subnet IDs"""

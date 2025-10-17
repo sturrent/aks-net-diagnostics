@@ -3,7 +3,7 @@ Unit tests for NSG Analyzer module.
 """
 
 import unittest
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock
 
 from aks_diagnostics.exceptions import AzureCLIError
 from aks_diagnostics.models import FindingCode, Severity

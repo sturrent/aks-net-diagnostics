@@ -411,7 +411,7 @@ class ConnectivityTester:
         if result["stderr"]:
             for pattern in curl_error_patterns:
                 if re.search(pattern, result["stderr"], re.IGNORECASE):
-                    has_curl_error = True
+                    _has_curl_error = True  # noqa: F841
                     # Extract the error message for better analysis
                     curl_error_match = re.search(r"curl: \((\d+)\) (.+?)(?:\\n|$)", result["stderr"])
                     if curl_error_match:
