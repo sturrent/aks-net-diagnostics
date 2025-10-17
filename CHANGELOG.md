@@ -15,13 +15,14 @@ and this project adheres on [Semantic Versioning](https://semver.org/spec/v2.0.0
   - isort for import organization
   - Pre-push git hook for automated quality checks
   - GitHub Actions CI/CD workflow
-  - Quality check script (`check_quality.ps1`)
+  - Quality check scripts (`tools/check_quality.sh` for Linux/Mac, `tools/check_quality.ps1` for Windows)
 - **Development Documentation**: Created comprehensive developer documentation
   - `docs/DEVELOPMENT.md` - Complete development setup and workflow
   - `docs/PRE_PUSH_HOOK.md` - Pre-push hook usage guide
   - `docs/ARCHITECTURE.md` - Moved from root for better organization
 - **Test Suite**: Maintained 139 passing unit tests with 80%+ coverage
 - **Development Requirements**: Added `dev-requirements.txt` with all quality tools
+- **Tool Organization**: Created `tools/` directory for development scripts
 
 ### Changed
 - **Python Version Requirement**: Updated from 3.7+ to 3.9+ for modern type hinting support

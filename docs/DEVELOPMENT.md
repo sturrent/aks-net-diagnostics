@@ -101,9 +101,12 @@ This project maintains high code quality standards using automated tools. **All 
 ### Running Quality Checks
 
 #### All-in-One Quality Check
-```powershell
-# Run all quality checks at once
-.\check_quality.ps1
+```bash
+# Run all quality checks at once (Linux/Mac)
+./tools/check_quality.sh
+
+# Or on Windows (PowerShell)
+.\tools\check_quality.ps1
 ```
 
 This script runs:
@@ -277,9 +280,12 @@ git checkout -b fix/bug-description
 
 ### 3. Run Quality Checks
 
-```powershell
-# Run all checks
-.\check_quality.ps1
+```bash
+# Run all checks (Linux/Mac)
+./tools/check_quality.sh
+
+# Or on Windows
+.\tools\check_quality.ps1
 
 # Or run individually
 black .
@@ -346,9 +352,10 @@ aks-net-diagnostics/
 │   └── PRE_PUSH_HOOK.md
 ├── .github/workflows/         # CI/CD
 │   └── ci.yml
-├── aks-net-diagnostics.py    # Main entry point
-├── build_zipapp.py           # Build script
-├── check_quality.ps1         # Quality check script
+├── tools/                     # Development tools
+│   ├── build_zipapp.py       # Build script for .pyz
+│   ├── check_quality.sh      # Quality check (Linux/Mac)
+│   └── check_quality.ps1     # Quality check (Windows)
 ├── .flake8                   # Flake8 config
 ├── pylintrc                  # Pylint config
 ├── pyproject.toml            # Black/isort config
@@ -364,17 +371,16 @@ aks-net-diagnostics/
 
 ### Pre-push hook not running
 
-```powershell
+```bash
 # Check if hook exists
-Test-Path .git\hooks\pre-push
+ls -la .git/hooks/pre-push
 
 # Verify Python environment
-Get-Command python
+which python
 
 # Manually run quality checks
-.\check_quality.ps1
+./tools/check_quality.sh
 ```
-
 ### Import errors
 
 ```bash

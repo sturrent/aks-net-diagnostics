@@ -56,9 +56,12 @@ git checkout -b feature/my-feature
 
 ### Running Quality Checks
 
-```powershell
-# Run all quality checks at once
-.\check_quality.ps1
+```bash
+# Run all quality checks at once (Linux/Mac)
+./tools/check_quality.sh
+
+# Or on Windows (PowerShell)
+.\tools\check_quality.ps1
 ```
 
 ### Pre-Push Hook
@@ -217,7 +220,7 @@ refactor: Extract data collection to separate module
 - [ ] Type hints added for all functions
 - [ ] Docstrings added for public methods
 - [ ] Documentation updated (README.md, ARCHITECTURE.md if applicable)
-- [ ] `.pyz` build tested (`python build_zipapp.py && python aks-net-diagnostics.pyz --help`)
+- [ ] `.pyz` build tested (`python tools/build_zipapp.py && python aks-net-diagnostics.pyz --help`)
 - [ ] No breaking changes (or clearly documented if unavoidable)
 
 ## Building the Distribution
@@ -228,7 +231,7 @@ The project uses Python's `zipapp` module to create a single-file executable:
 
 ```bash
 # Build the .pyz file
-python build_zipapp.py
+python tools/build_zipapp.py
 
 # Verify it works
 python aks-net-diagnostics.pyz --help

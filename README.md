@@ -77,7 +77,7 @@ python aks-net-diagnostics.py -n myCluster -g myResourceGroup
 To create the single-file distribution:
 
 ```bash
-python build_zipapp.py
+python tools/build_zipapp.py
 # Creates: aks-net-diagnostics.pyz
 ```
 
@@ -405,8 +405,8 @@ source venv/bin/activate  # On Windows: .\venv\Scripts\Activate.ps1
 pip install -r dev-requirements.txt
 
 # Run quality checks
-.\check_quality.ps1  # On Windows
-./check_quality.sh   # On Linux/Mac (if available)
+./tools/check_quality.sh   # On Linux/Mac
+.\tools\check_quality.ps1  # On Windows
 
 # Run tests
 pytest -v

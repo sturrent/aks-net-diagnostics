@@ -535,7 +535,7 @@ The tool is distributed as a **Python zipapp** - a single executable `.pyz` file
 
 ```mermaid
 graph LR
-    A[Source Files] --> B[build_zipapp.py]
+    A[Source Files] --> B[tools/build_zipapp.py]
     B --> C[Create build_temp/]
     C --> D[Copy __main__.py]
     C --> E[Copy aks_diagnostics/]
@@ -591,7 +591,7 @@ sequenceDiagram
     Dev->>Git: git tag v2.1.0
     Dev->>Git: git push origin v2.1.0
     Git->>GHA: Trigger on tag push
-    GHA->>GHA: Run build_zipapp.py
+    GHA->>GHA: Run tools/build_zipapp.py
     GHA->>GHA: Test .pyz file
     GHA->>Rel: Create Release
     GHA->>Rel: Upload aks-net-diagnostics.pyz
@@ -613,7 +613,7 @@ sequenceDiagram
 
 #### Build Script Details
 
-The `build_zipapp.py` script:
+The `tools/build_zipapp.py` script:
 1. Creates temporary `build_temp/` directory
 2. Copies `aks-net-diagnostics.py` as `__main__.py`
 3. Copies `aks_diagnostics/` module (excluding `__pycache__`)
