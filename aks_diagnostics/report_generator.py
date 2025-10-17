@@ -32,7 +32,7 @@ class ReportGenerator:
         nsg_analysis: Dict[str, Any],
         api_probe_results: Optional[Dict[str, Any]] = None,
         failure_analysis: Optional[Dict[str, Any]] = None,
-        script_version: str = "2.1",
+        script_version: str = "1.1.2",
         logger: Optional[logging.Logger] = None,
     ):
         """

@@ -649,4 +649,4 @@ The `build_zipapp.py` script:
 ---
 
 **Last Updated**: October 2025  
-**Version**: 2.1
+**Version**: 1.1.2

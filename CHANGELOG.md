@@ -5,7 +5,7 @@ All notable changes to the AKS Network Diagnostics tool will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres on [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.2] - 2025-10-17
 
 ### Added
 - **Code Quality Infrastructure**: Added comprehensive quality tooling and automation
