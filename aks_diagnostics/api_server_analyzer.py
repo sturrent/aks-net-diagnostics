@@ -256,7 +256,7 @@ class APIServerAccessAnalyzer:
             implications.extend(
                 [
                     "[OK] API server access is restricted to specified IP ranges",
-                    "[!] API server is still exposed to the internet",
+                    "[WARNING] API server is still exposed to the internet",
                     "[NOTE] Users/services must access from authorized IP ranges",
                     "[NOTE] Node-to-API traffic must originate from authorized ranges",
                 ]
@@ -270,8 +270,8 @@ class APIServerAccessAnalyzer:
         else:  # unrestricted_public
             implications.extend(
                 [
-                    "[!] API server is publicly accessible from any IP",
-                    "[!] No network-level access restrictions",
+                    "[WARNING] API server is publicly accessible from any IP",
+                    "[WARNING] No network-level access restrictions",
                     "[NOTE] Security relies entirely on authentication and RBAC",
                     "[NOTE] Consider implementing IP restrictions for enhanced security",
                 ]
@@ -297,14 +297,14 @@ class APIServerAccessAnalyzer:
 
             if udr_override:
                 # UDR scenario: Load Balancer IP is not used
-                implications.append("[!] CRITICAL: User Defined Route (UDR) overrides Load Balancer outbound")
+                implications.append("[WARNING] CRITICAL: User Defined Route (UDR) overrides Load Balancer outbound")
                 implications.append(
-                    f"[!] Traffic is routed through virtual appliance: {udr_override['virtualApplianceIp']}"
+                    f"[WARNING] Traffic is routed through virtual appliance: {udr_override['virtualApplianceIp']}"
                 )
-                implications.append("[!] The virtual appliance's PUBLIC IP must be in authorized ranges")
-                implications.append("[!] Load Balancer IPs are NOT effective due to UDR override")
+                implications.append("[WARNING] The virtual appliance's PUBLIC IP must be in authorized ranges")
+                implications.append("[WARNING] Load Balancer IPs are NOT effective due to UDR override")
                 implications.append(
-                    "[!] Nodes cannot reach API server if firewall/appliance public IP is not authorized"
+                    "[WARNING] Nodes cannot reach API server if firewall/appliance public IP is not authorized"
                 )
 
                 # Add critical security finding
