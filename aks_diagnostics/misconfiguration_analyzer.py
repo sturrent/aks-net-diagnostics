@@ -30,6 +30,7 @@ class MisconfigurationAnalyzer:
     def analyze(
         self,
         cluster_info: Dict[str, Any],
+        *,
         outbound_analysis: Dict[str, Any],
         outbound_ips: List[str],
         private_dns_analysis: Dict[str, Any],

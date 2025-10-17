@@ -62,8 +62,10 @@ class AKSNetworkDiagnostics:
         self.subscription: Optional[str] = None
         self.probe_test: bool = False
         self.json_out: Optional[str] = None
+        self.json_report: Optional[str] = None
         self.no_json: bool = False
         self.show_details: bool = False
+        self._cluster_stopped: bool = False
 
         # Analysis results
         self.cluster_info: Dict[str, Any] = {}
@@ -355,8 +357,8 @@ EXAMPLES:
             import urllib.error
             import urllib.request
 
-            response = urllib.request.urlopen("https://api.ipify.org", timeout=5)
-            return response.read().decode("utf-8").strip()
+            with urllib.request.urlopen("https://api.ipify.org", timeout=5) as response:
+                return response.read().decode("utf-8").strip()
         except Exception:
             return None
 

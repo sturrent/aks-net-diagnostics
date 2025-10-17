@@ -21,6 +21,7 @@ class ReportGenerator:
         cluster_name: str,
         resource_group: str,
         subscription: str,
+        *,
         cluster_info: Dict[str, Any],
         findings: List[Dict[str, Any]],
         vnets_analysis: List[Dict[str, Any]],
