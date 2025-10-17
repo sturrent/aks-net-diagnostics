@@ -2,14 +2,14 @@
 
 A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network configurations and diagnosing connectivity issues. Features a modular architecture with specialized analyzers for deep network troubleshooting.
 
-**Version**: 2.0.0 (Azure SDK)
+**Version**: 2.2.0 (Azure SDK)
 
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![Azure SDK](https://img.shields.io/badge/Azure%20SDK-latest-blue.svg)](https://azure.github.io/azure-sdk-for-python/)
 [![Tests](https://img.shields.io/badge/tests-136%20passing-success.svg)](tests/)
 [![Code Quality](https://img.shields.io/badge/pylint-9.70%2F10-brightgreen.svg)](pylintrc)
 [![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Version](https://img.shields.io/badge/version-2.0.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.2.0-green.svg)](CHANGELOG.md)
 
 ## Key Features
 
