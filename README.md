@@ -7,6 +7,7 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![Azure SDK](https://img.shields.io/badge/Azure%20SDK-latest-blue.svg)](https://azure.github.io/azure-sdk-for-python/)
 [![Tests](https://img.shields.io/badge/tests-136%20passing-success.svg)](tests/)
+[![Code Quality](https://img.shields.io/badge/code%20quality-CI%2FCD-success.svg)](.github/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-2.0.0-green.svg)](CHANGELOG.md)
 
 ## Key Features
@@ -417,7 +418,23 @@ Generated with `--json-report`, contains:
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing guidelines, and contribution process.
+This project uses automated code quality tools and testing:
+
+- **Code Quality Tools**: Black, isort, Flake8, Pylint
+- **Testing**: 136 unit tests with pytest
+- **CI/CD**: GitHub Actions for automated checks
+- **Pre-Push Hook**: Automatic quality checks before push
+
+**For contributors:**
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and setup
+- See [DEVELOPMENT.md](DEVELOPMENT.md) for development environment setup
+- See [docs/PRE_PUSH_HOOK.md](docs/PRE_PUSH_HOOK.md) for git hook details
+
+**Quality Standards:**
+- Zero Flake8 violations (PEP8 compliance)
+- Pylint score 9.5+/10 (Azure CLI standards)
+- 120 character line length
+- Full type hints and docstrings
 
 For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 

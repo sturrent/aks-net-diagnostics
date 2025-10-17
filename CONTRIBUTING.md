@@ -144,10 +144,61 @@ refactor: Extract data collection to separate module
 
 ### Pull Request Checklist
 
-- [ ] Tests added/updated and passing (`pytest -v`)
-- [ ] Code follows project style guidelines
+Before submitting your pull request:
+
+- [ ] Code follows project style guidelines (Black, isort)
+- [ ] All quality checks pass locally:
+  - [ ] `black --check .` passes
+  - [ ] `isort --check-only .` passes
+  - [ ] `flake8 .` passes (zero violations)
+  - [ ] `pylint aks_diagnostics/` scores 9.5+ / 10
+  - [ ] `pytest -v` all tests pass
 - [ ] Type hints added for all functions
 - [ ] Docstrings added for public methods
+- [ ] Tests added/updated and passing
+- [ ] Documentation updated (README.md, ARCHITECTURE.md if applicable)
+- [ ] `.pyz` build tested (if modifying core functionality)
+- [ ] No breaking changes (or clearly documented if unavoidable)
+- [ ] Commit messages follow conventional commits format
+- [ ] No merge conflicts with main branch
+
+**Note:** The repository includes a **pre-push git hook** that automatically runs these checks. If you've cloned the repository, the hook will run automatically before each push. You can also run `.\check_quality.ps1` manually to check everything at once.
+
+### Automated Checks
+
+#### Pre-Push Git Hook
+
+After cloning the repository, a **pre-push hook** is automatically available that runs quality checks before allowing a push:
+
+- ✅ Black (code formatting) - blocks push if fails
+- ✅ isort (import sorting) - blocks push if fails  
+- ✅ Flake8 (PEP8 style) - blocks push if fails
+- ⚠️ Pylint (code quality) - shows warnings, doesn't block
+- ✅ Pytest (unit tests) - blocks push if fails
+
+**The hook will prevent pushing code that fails critical quality checks.**
+
+To bypass the hook (not recommended):
+```bash
+git push --no-verify
+```
+
+See [docs/PRE_PUSH_HOOK.md](docs/PRE_PUSH_HOOK.md) for details.
+
+#### GitHub Actions CI/CD
+
+When you open a pull request, GitHub Actions will automatically run:
+
+- Code formatting check (Black)
+- Import sorting check (isort)
+- Style check (Flake8)
+- Code quality check (Pylint)
+- Unit tests (Pytest)
+- Coverage reporting
+
+**Pull requests require passing CI checks before they can be merged.**
+
+You can view the CI configuration in [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - [ ] Documentation updated (README.md, ARCHITECTURE.md if applicable)
 - [ ] `.pyz` build tested (`python build_zipapp.py && python aks-net-diagnostics.pyz --help`)
 - [ ] No breaking changes (or clearly documented if unavoidable)
