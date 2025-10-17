@@ -586,9 +586,9 @@ class ReportGenerator:
             # Display findings summary
             print("**Findings Summary:**")
             if critical_count > 0:
-                print(f"- [X] {critical_count} Critical issue(s)")
+                print(f"- [CRITICAL] {critical_count} Critical issue(s)")
             if error_count > 0:
-                print(f"- [X] {error_count} Error issue(s)")
+                print(f"- [ERROR] {error_count} Error issue(s)")
             if warning_count > 0:
                 print(f"- [WARNING] {warning_count} Warning issue(s)")
             if info_count > 0:
@@ -597,12 +597,14 @@ class ReportGenerator:
 
             # Display all findings in detail
             for finding in self.findings:
-                severity_icon = {"critical": "[X]", "error": "[X]", "warning": "[WARNING]", "info": "[INFO]"}.get(
-                    finding.get("severity", "info"), "[INFO]"
-                )
+                severity_icon = {
+                    "critical": "[CRITICAL]",
+                    "error": "[ERROR]",
+                    "warning": "[WARNING]",
+                    "info": "[INFO]",
+                }.get(finding.get("severity", "info"), "[INFO]")
 
                 print(f"### {severity_icon} {finding.get('code', 'UNKNOWN')}")
-                print(f"**Severity:** {finding.get('severity', 'info').upper()}")
                 print(f"**Message:** {finding.get('message', '')}")
                 if finding.get("recommendation"):
                     print(f"**Recommendation:** {finding.get('recommendation', '')}")
