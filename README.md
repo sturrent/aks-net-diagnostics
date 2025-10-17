@@ -495,6 +495,8 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 Built for Azure Kubernetes Service troubleshooting by the Azure community.
 
+> **Note**: This code has been developed with the assistance of AI tools.
+
 ---
 
 **Version**: 1.1.2  
