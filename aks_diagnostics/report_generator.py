@@ -231,7 +231,7 @@ class ReportGenerator:
             # Show warning findings
             for finding in warning_findings:
                 message = finding.get("message", "Unknown issue")
-                print(f"- [!] {message}")
+                print(f"- [WARNING] {message}")
 
         print()
         if json_report_path:
@@ -350,7 +350,7 @@ class ReportGenerator:
             else:
                 print("- **Access Restrictions:** None (unrestricted public access)")
                 if not is_private:
-                    print("  [!] API server is accessible from any IP address on the internet")
+                    print("  [WARNING] API server is accessible from any IP address on the internet")
 
         print()
 
@@ -430,16 +430,19 @@ class ReportGenerator:
                 if failed > 0:
                     print(f"- **X Failed:** {failed}")
                 if errors > 0:
-                    print(f"- **[!] Errors:** {errors}")
+                    print(f"- **[WARNING] Errors:** {errors}")
 
                 # Show detailed results
                 tests = self.api_probe_results.get("tests", [])
                 if tests:
                     print("\n**Test Details:**")
                     for test in tests:
-                        status_icon = {"passed": "[OK]", "failed": "[ERROR]", "error": "[!]", "skipped": "[SKIP]"}.get(
-                            test.get("status"), "[?]"
-                        )
+                        status_icon = {
+                            "passed": "[OK]",
+                            "failed": "[ERROR]",
+                            "error": "[WARNING]",
+                            "skipped": "[SKIP]",
+                        }.get(test.get("status"), "[?]")
 
                         test_name = test.get("test_name", "Unknown Test")
                         vmss_name = test.get("vmss_name", "unknown")
@@ -558,7 +561,7 @@ class ReportGenerator:
     def _print_blocking_rules(self, blocking_rules: List[Dict[str, Any]]):
         """Print blocking rules section"""
         if blocking_rules:
-            print("\n**[!] Potentially Blocking Rules:**")
+            print("\n**[WARNING] Potentially Blocking Rules:**")
             for rule in blocking_rules:
                 print(f"- **{rule.get('ruleName', 'Unknown')}** in NSG {rule.get('nsgName', 'Unknown')}")
                 print(f"  - Priority: {rule.get('priority', 'Unknown')}")
@@ -587,15 +590,15 @@ class ReportGenerator:
             if error_count > 0:
                 print(f"- [X] {error_count} Error issue(s)")
             if warning_count > 0:
-                print(f"- [!] {warning_count} Warning issue(s)")
+                print(f"- [WARNING] {warning_count} Warning issue(s)")
             if info_count > 0:
-                print(f"- [i] {info_count} Informational finding(s)")
+                print(f"- [INFO] {info_count} Informational finding(s)")
             print()
 
             # Display all findings in detail
             for finding in self.findings:
-                severity_icon = {"critical": "[X]", "error": "[X]", "warning": "[!]", "info": "[i]"}.get(
-                    finding.get("severity", "info"), "[i]"
+                severity_icon = {"critical": "[X]", "error": "[X]", "warning": "[WARNING]", "info": "[INFO]"}.get(
+                    finding.get("severity", "info"), "[INFO]"
                 )
 
                 print(f"### {severity_icon} {finding.get('code', 'UNKNOWN')}")
