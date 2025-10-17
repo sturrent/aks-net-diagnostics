@@ -3,7 +3,39 @@
 All notable changes to the AKS Network Diagnostics tool will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project adheres on [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.1.2] - 2025-10-17
+
+### Added
+- **Code Quality Infrastructure**: Added comprehensive quality tooling and automation
+  - Pylint configuration with 9.96/10 score target
+  - Flake8 for PEP8 style compliance (zero violations)
+  - Black code formatter (120 char line length)
+  - isort for import organization
+  - Pre-push git hook for automated quality checks
+  - GitHub Actions CI/CD workflow
+  - Quality check scripts (`tools/check_quality.sh` for Linux/Mac, `tools/check_quality.ps1` for Windows)
+- **Development Documentation**: Created comprehensive developer documentation
+  - `docs/DEVELOPMENT.md` - Complete development setup and workflow
+  - `docs/PRE_PUSH_HOOK.md` - Pre-push hook usage guide
+  - `docs/ARCHITECTURE.md` - Moved from root for better organization
+- **Test Suite**: Maintained 139 passing unit tests with 80%+ coverage
+- **Development Requirements**: Added `dev-requirements.txt` with all quality tools
+- **Tool Organization**: Created `tools/` directory for development scripts
+
+### Changed
+- **Python Version Requirement**: Updated from 3.7+ to 3.9+ for modern type hinting support
+- **Documentation Organization**: Moved technical documentation to `docs/` directory
+  - `ARCHITECTURE.md` → `docs/ARCHITECTURE.md`
+- **Code Formatting**: All code formatted with Black and isort
+- **Quality Standards**: Enforced stricter code quality requirements for contributions
+
+### Improved
+- **Code Quality**: Achieved 9.96/10 Pylint score (up from untracked)
+- **Code Style**: Zero Flake8 violations (excluding E501 line-too-long)
+- **Import Organization**: All imports sorted and organized with isort
+- **Documentation**: Updated all documentation with links to new docs/ structure
 
 ## [1.1.1] - 2025-10-15
 

@@ -2,6 +2,10 @@
 
 Thank you for your interest in contributing to AKS Network Diagnostics! This document provides guidelines and information for contributors.
 
+## Quick Start
+
+For detailed development setup instructions, code quality tools, testing, and workflows, see **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
+
 ## Ways to Contribute
 
 - **Bug Reports**: Found a bug? Open an issue with details and steps to reproduce
@@ -14,20 +18,87 @@ Thank you for your interest in contributing to AKS Network Diagnostics! This doc
 
 ### Prerequisites
 
-- Python 3.7+
-- Azure CLI 2.0+
+- Python 3.9 or higher
 - Git
-- Azure subscription (for testing)
+- Azure CLI 2.0+ (optional, for testing)
+- Virtual environment (venv)
 
 ### Development Setup
+
+See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** for complete setup instructions.
+
+Quick start:
 
 ```bash
 # Fork and clone the repository
 git clone https://github.com/YOUR-USERNAME/aks-net-diagnostics.git
 cd aks-net-diagnostics
 
+# Create virtual environment and install dependencies
+python -m venv venv
+source venv/bin/activate  # On Windows: .\venv\Scripts\Activate.ps1
+pip install -r dev-requirements.txt
+
 # Create a feature branch
 git checkout -b feature/my-feature
+```
+
+## Code Quality Requirements
+
+**All contributions must meet these quality standards:**
+
+- ✅ **Pylint Score**: 9.5/10 or higher (current: 9.96/10)
+- ✅ **Flake8**: Zero violations (excluding E501 line-too-long)
+- ✅ **Black**: Code must be formatted with Black
+- ✅ **isort**: Imports must be sorted with isort
+- ✅ **Tests**: All tests must pass (pytest)
+- ✅ **Coverage**: 80%+ coverage on new code
+
+### Running Quality Checks
+
+```bash
+# Run all quality checks at once (Linux/Mac)
+./tools/check_quality.sh
+
+# Or on Windows (PowerShell)
+.\tools\check_quality.ps1
+```
+
+### Pre-Push Hook
+
+A pre-push git hook automatically runs quality checks before allowing pushes. This ensures only quality code reaches the repository.
+
+See **[docs/PRE_PUSH_HOOK.md](docs/PRE_PUSH_HOOK.md)** for details.
+
+### Individual Tools
+
+```bash
+# Format code
+black .
+isort .
+
+# Check style
+flake8 aks_diagnostics/ aks-net-diagnostics.py tests/
+
+# Check code quality
+pylint aks_diagnostics/ aks-net-diagnostics.py
+
+# Run tests
+pytest -v
+```
+
+For detailed information on each tool, see **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
+
+## Contribution Guidelines
+
+### Code Style
+
+- **Python Version**: 3.9+
+- **Type Hints**: All function parameters and return values must have type annotations
+- **Docstrings**: All public classes, methods, and functions must have docstrings
+- **Naming**: Use descriptive names following Python conventions (snake_case for functions/variables, PascalCase for classes)
+- **Line Length**: Maximum 120 characters per line
+- **Imports**: Grouped and sorted with isort (standard library, third-party, local modules)
 
 # Make your changes
 # ... edit files ...
@@ -149,7 +220,7 @@ refactor: Extract data collection to separate module
 - [ ] Type hints added for all functions
 - [ ] Docstrings added for public methods
 - [ ] Documentation updated (README.md, ARCHITECTURE.md if applicable)
-- [ ] `.pyz` build tested (`python build_zipapp.py && python aks-net-diagnostics.pyz --help`)
+- [ ] `.pyz` build tested (`python tools/build_zipapp.py && python aks-net-diagnostics.pyz --help`)
 - [ ] No breaking changes (or clearly documented if unavoidable)
 
 ## Building the Distribution
@@ -160,7 +231,7 @@ The project uses Python's `zipapp` module to create a single-file executable:
 
 ```bash
 # Build the .pyz file
-python build_zipapp.py
+python tools/build_zipapp.py
 
 # Verify it works
 python aks-net-diagnostics.pyz --help

@@ -5,6 +5,8 @@ A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![Azure CLI 2.0+](https://img.shields.io/badge/Azure%20CLI-2.0+-blue.svg)](https://docs.microsoft.com/en-us/cli/azure/)
 [![Tests](https://img.shields.io/badge/tests-139%20passing-success.svg)](tests/)
+[![Code Quality](https://img.shields.io/badge/pylint-9.96%2F10-brightgreen.svg)](pylintrc)
+[![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 ## Key Features
 
@@ -75,7 +77,7 @@ python aks-net-diagnostics.py -n myCluster -g myResourceGroup
 To create the single-file distribution:
 
 ```bash
-python build_zipapp.py
+python tools/build_zipapp.py
 # Creates: aks-net-diagnostics.pyz
 ```
 
@@ -134,7 +136,7 @@ The tool uses a **modular architecture** with specialized analyzers:
 
 **Key Modules**: NSGAnalyzer, DNSAnalyzer, RouteTableAnalyzer, APIServerAccessAnalyzer, ConnectivityTester, OutboundConnectivityAnalyzer
 
-For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)
+For detailed architecture documentation, see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Common Issues Detected
 
@@ -269,27 +271,21 @@ python aks-net-diagnostics.py -g my-resource-group -n my-private-cluster --detai
 ## Findings
 
 **Findings Summary:**
-- [X] 4 Critical issue(s)
+- [CRITICAL] 4
 
-**Critical Issues:**
-
-### [X] PRIVATE_DNS_MISCONFIGURED
-**Severity:** CRITICAL
+### [CRITICAL] PRIVATE_DNS_MISCONFIGURED
 **Message:** Private cluster is using custom DNS servers (10.1.0.10) that cannot resolve Azure private DNS zones
 **Recommendation:** Configure DNS forwarding to 168.63.129.16 for '*.privatelink.*.azmk8s.io'
 
-### [X] CLUSTER_OPERATION_FAILURE
-**Severity:** CRITICAL
+### [CRITICAL] CLUSTER_OPERATION_FAILURE
 **Message:** Cluster failed with error: VMExtensionProvisioningError - agents are unable to resolve Kubernetes API server name
 **Recommendation:** Check Azure Activity Log and custom DNS configuration
 
-### [X] NODE_POOL_FAILURE
-**Severity:** CRITICAL
+### [CRITICAL] NODE_POOL_FAILURE
 **Message:** Node pools in failed state: nodepool1
 **Recommendation:** Check node pool configuration and Azure Activity Log
 
-### [X] PDNS_DNS_HOST_VNET_LINK_MISSING
-**Severity:** CRITICAL
+### [CRITICAL] PDNS_DNS_HOST_VNET_LINK_MISSING
 **Message:** DNS server 10.1.0.10 is hosted in VNet hub-vnet but this VNet is not linked to private DNS zone
 **Recommendation:** Link VNet hub-vnet to private DNS zone for proper DNS resolution
 ```
@@ -361,7 +357,7 @@ Generated with `--json-report`, contains:
     "resource_group": "my-rg",
     "subscription": "xxx",
     "generated": "2025-10-03T14:30:00Z",
-    "script_version": "2.1"
+    "script_version": "1.1.2"
   },
   "cluster_info": { "..." },
   "findings": [
@@ -385,9 +381,38 @@ Generated with `--json-report`, contains:
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing guidelines, and contribution process.
+### For Contributors
 
-For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Complete development setup, quality tools, testing
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution guidelines and workflow
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Technical architecture and design
+- **[docs/PRE_PUSH_HOOK.md](docs/PRE_PUSH_HOOK.md)** - Pre-push hook details
+
+### Quick Start for Development
+
+```bash
+# Clone and setup
+git clone https://github.com/sturrent/aks-net-diagnostics.git
+cd aks-net-diagnostics
+python -m venv venv
+source venv/bin/activate  # On Windows: .\venv\Scripts\Activate.ps1
+pip install -r dev-requirements.txt
+
+# Run quality checks
+./tools/check_quality.sh   # On Linux/Mac
+.\tools\check_quality.ps1  # On Windows
+
+# Run tests
+pytest -v
+```
+
+### Quality Standards
+
+This project maintains high code quality:
+- **Pylint**: 9.96/10 score
+- **Flake8**: Zero violations (excluding line length)
+- **Tests**: 139 passing unit tests
+- **Coverage**: 80%+ on new code
 
 ## Troubleshooting
 
@@ -470,8 +495,10 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 Built for Azure Kubernetes Service troubleshooting by the Azure community.
 
+> **Note**: This code has been developed with the assistance of AI tools.
+
 ---
 
-**Version**: 2.1  
+**Version**: 1.1.2  
 **Last Updated**: October 2025  
 **Maintained by**: [@sturrent](https://github.com/sturrent)
