@@ -302,27 +302,21 @@ python aks-net-diagnostics.py -g my-resource-group -n my-private-cluster --detai
 ## Findings
 
 **Findings Summary:**
-- [X] 4 Critical issue(s)
+- [CRITICAL] 4
 
-**Critical Issues:**
-
-### [X] PRIVATE_DNS_MISCONFIGURED
-**Severity:** CRITICAL
+### [CRITICAL] PRIVATE_DNS_MISCONFIGURED
 **Message:** Private cluster is using custom DNS servers (10.1.0.10) that cannot resolve Azure private DNS zones
 **Recommendation:** Configure DNS forwarding to 168.63.129.16 for '*.privatelink.*.azmk8s.io'
 
-### [X] CLUSTER_OPERATION_FAILURE
-**Severity:** CRITICAL
+### [CRITICAL] CLUSTER_OPERATION_FAILURE
 **Message:** Cluster failed with error: VMExtensionProvisioningError - agents are unable to resolve Kubernetes API server name
 **Recommendation:** Check Azure Activity Log and custom DNS configuration
 
-### [X] NODE_POOL_FAILURE
-**Severity:** CRITICAL
+### [CRITICAL] NODE_POOL_FAILURE
 **Message:** Node pools in failed state: nodepool1
 **Recommendation:** Check node pool configuration and Azure Activity Log
 
-### [X] PDNS_DNS_HOST_VNET_LINK_MISSING
-**Severity:** CRITICAL
+### [CRITICAL] PDNS_DNS_HOST_VNET_LINK_MISSING
 **Message:** DNS server 10.1.0.10 is hosted in VNet hub-vnet but this VNet is not linked to private DNS zone
 **Recommendation:** Link VNet hub-vnet to private DNS zone for proper DNS resolution
 ```
