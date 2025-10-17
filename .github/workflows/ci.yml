@@ -2,9 +2,9 @@ name: CI - Code Quality and Tests
 
 on:
   push:
-    branches: [ main, develop, azure-sdk-migration-ng ]
+    branches: [ main, azure-sdk ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, azure-sdk ]
 
 jobs:
   quality-checks:
