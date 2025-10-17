@@ -75,7 +75,7 @@ class RouteTableAnalyzer:
                 route_table = subnet_info.get("routeTable")
                 if route_table and route_table.get("id"):
                     route_table_id = route_table["id"]
-                    self.logger.info(f"    Found route table: {route_table_id}")
+                    self.logger.info("    Found route table: %s", route_table_id)
 
                     # Get route table details
                     rt_analysis = self._analyze_route_table(route_table_id, subnet_id)
@@ -86,10 +86,10 @@ class RouteTableAnalyzer:
                         for route in rt_analysis.get("routes", []):
                             self._categorize_route(route, udr_analysis)
                 else:
-                    self.logger.info(f"    No route table associated with subnet: {subnet_id}")
+                    self.logger.info("    No route table associated with subnet: %s", subnet_id)
 
             except Exception as e:
-                self.logger.info(f"    Error analyzing subnet {subnet_id}: {e}")
+                self.logger.info("    Error analyzing subnet %s: %s", subnet_id, e)
 
         return udr_analysis
 
@@ -142,10 +142,10 @@ class RouteTableAnalyzer:
             return normalize_dict_keys(subnet.as_dict())
 
         except (ResourceNotFoundError, HttpResponseError) as e:
-            self.logger.info(f"    Error getting subnet details for {subnet_id}: {e}")
+            self.logger.info("    Error getting subnet details for %s: %s", subnet_id, e)
             return None
         except Exception as e:
-            self.logger.info(f"    Error parsing subnet ID {subnet_id}: {e}")
+            self.logger.info("    Error parsing subnet ID %s: %s", subnet_id, e)
             return None
 
     def _analyze_route_table(self, route_table_id: str, subnet_id: str) -> Optional[Dict[str, Any]]:
@@ -201,12 +201,12 @@ class RouteTableAnalyzer:
                 if route_analysis:
                     analysis["routes"].append(route_analysis)
 
-            self.logger.info(f"    Route table {route_table_name} has {len(routes)} route(s)")
+            self.logger.info("    Route table %s has %s route(s)", route_table_name, len(routes))
 
             return analysis
 
         except Exception as e:
-            self.logger.info(f"    Error analyzing route table {route_table_id}: {e}")
+            self.logger.info("    Error analyzing route table %s: %s", route_table_id, e)
             return None
 
     def _analyze_individual_route(self, route: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -237,10 +237,10 @@ class RouteTableAnalyzer:
             return analysis
 
         except Exception as e:
-            self.logger.info(f"    Error analyzing route: {e}")
+            self.logger.info("    Error analyzing route: %s", e)
             return None
 
-    def _assess_route_impact(self, address_prefix: str, next_hop_type: str, next_hop_ip: str) -> Dict[str, Any]:
+    def _assess_route_impact(self, address_prefix: str, next_hop_type: str, _next_hop_ip: str) -> Dict[str, Any]:
         """
         Assess the potential impact of a route on AKS connectivity.
 

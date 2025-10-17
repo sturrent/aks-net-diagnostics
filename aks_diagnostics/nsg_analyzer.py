@@ -208,14 +208,14 @@ class NSGAnalyzer(BaseAnalyzer):
                                     }
                                 )
 
-                                self.logger.info(f"  Found NSG on subnet {subnet_info.name}: {nsg_name}")
+                                self.logger.info("  Found NSG on subnet %s: %s", subnet_info.name, nsg_name)
                         else:
-                            self.logger.info(f"  No NSG found on subnet {subnet_info.name}")
+                            self.logger.info("  No NSG found on subnet %s", subnet_info.name)
 
                     except (ResourceNotFoundError, HttpResponseError) as e:
-                        self.logger.error(f"  Failed to analyze subnet {subnet_id}: {e}")
+                        self.logger.error("  Failed to analyze subnet %s: %s", subnet_id, e)
                     except Exception as e:
-                        self.logger.error(f"  Error parsing subnet ID {subnet_id}: {e}")
+                        self.logger.error("  Error parsing subnet ID %s: %s", subnet_id, e)
 
     def _analyze_nic_nsgs(self) -> None:
         """Analyze NSGs associated with node NICs."""
@@ -259,12 +259,12 @@ class NSGAnalyzer(BaseAnalyzer):
                                 }
                             )
 
-                            self.logger.info(f"  Found NSG on VMSS {vmss_name} NIC: {nsg_name}")
+                            self.logger.info("  Found NSG on VMSS %s NIC: %s", vmss_name, nsg_name)
 
                     except (AzureSDKError, HttpResponseError) as e:
-                        self.logger.error(f"  Failed to analyze NIC NSG {nsg_id}: {e}")
+                        self.logger.error("  Failed to analyze NIC NSG %s: %s", nsg_id, e)
                 else:
-                    self.logger.info(f"  No NSG found on VMSS {vmss_name} NIC")
+                    self.logger.info("  No NSG found on VMSS %s NIC", vmss_name)
 
     def _analyze_inter_node_communication(self) -> None:
         """Analyze if NSG rules could block inter-node communication."""

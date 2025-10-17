@@ -42,10 +42,9 @@ def normalize_dict_keys(data: Any) -> Any:
     """
     if isinstance(data, dict):
         return {_snake_to_camel(k): normalize_dict_keys(v) for k, v in data.items()}
-    elif isinstance(data, list):
+    if isinstance(data, list):
         return [normalize_dict_keys(item) for item in data]
-    else:
-        return data
+    return data
 
 
 class AzureSDKClient:
@@ -168,10 +167,10 @@ class AzureSDKClient:
             cluster = self.aks_client.managed_clusters.get(resource_group, cluster_name)
             return cluster
 
-        except ResourceNotFoundError:
-            raise AzureSDKError(f"Cluster '{cluster_name}' not found in resource group '{resource_group}'")
+        except ResourceNotFoundError as exc:
+            raise AzureSDKError(f"Cluster '{cluster_name}' not found in resource group '{resource_group}'") from exc
         except HttpResponseError as e:
-            raise AzureSDKError(f"Failed to get cluster '{cluster_name}': {e.message}")
+            raise AzureSDKError(f"Failed to get cluster '{cluster_name}': {e.message}") from e
 
     @staticmethod
     def parse_resource_id(resource_id: str) -> Dict[str, str]:

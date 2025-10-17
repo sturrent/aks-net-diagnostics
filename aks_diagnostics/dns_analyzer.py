@@ -90,7 +90,7 @@ class DNSAnalyzer:
                 "analysis": "Custom private DNS zone configured",
             }
 
-            self.logger.info(f"  Custom private DNS zone: {private_dns_zone}")
+            self.logger.info("  Custom private DNS zone: %s", private_dns_zone)
 
             # Add informational finding
             from .models import FindingCode
@@ -136,7 +136,7 @@ class DNSAnalyzer:
                 self.logger.debug("  No VNet subnet ID found in cluster info")
                 return
 
-            self.logger.debug(f"  Found VNet subnet ID: {vnet_subnet_id}")
+            self.logger.debug("  Found VNet subnet ID: %s", vnet_subnet_id)
 
             # Parse VNet resource ID from subnet ID using SDK helper
             # Format: /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{subnet}
@@ -157,19 +157,19 @@ class DNSAnalyzer:
                 self.dns_analysis["vnetDnsServers"] = self.vnet_dns_servers
 
             except (ResourceNotFoundError, HttpResponseError) as e:
-                self.logger.warning(f"  Unable to retrieve VNet information for {vnet_name}: {e}")
+                self.logger.warning("  Unable to retrieve VNet information for %s: %s", vnet_name, e)
                 return
             except Exception as e:
-                self.logger.warning(f"  Unable to parse VNet ID from subnet: {vnet_subnet_id}: {e}")
+                self.logger.warning("  Unable to parse VNet ID from subnet: %s: %s", vnet_subnet_id, e)
                 return
 
             if not dns_servers:
                 # Using Azure default DNS
-                self.logger.info(f"  VNet '{vnet_name}' using Azure default DNS (168.63.129.16)")
+                self.logger.info("  VNet '%s' using Azure default DNS (168.63.129.16)", vnet_name)
                 self.dns_analysis["vnetDnsConfig"] = "azure-default"
                 return
 
-            self.logger.info(f"  VNet '{vnet_name}' has custom DNS servers: {', '.join(dns_servers)}")
+            self.logger.info("  VNet '%s' has custom DNS servers: %s", vnet_name, ", ".join(dns_servers))
             self.dns_analysis["vnetDnsConfig"] = "custom"
 
             # Check for potential issues with custom DNS
@@ -231,7 +231,7 @@ class DNSAnalyzer:
                 self.logger.info("  VNet uses Azure DNS along with custom DNS servers")
 
         except Exception as e:
-            self.logger.error(f"  Failed to analyze VNet DNS configuration: {e}")
+            self.logger.error("  Failed to analyze VNet DNS configuration: %s", e)
 
     def validate_private_dns_resolution(self, nslookup_output: str, hostname: str) -> bool:
         """
@@ -259,7 +259,7 @@ class DNSAnalyzer:
                 "timed out",
             ]
             if any(error in output_to_parse.lower() for error in dns_error_patterns):
-                self.logger.warning(f"DNS resolution failed for {hostname}")
+                self.logger.warning("DNS resolution failed for %s", hostname)
                 return False  # DNS resolution failed completely
 
             # Parse nslookup output to extract IP addresses
@@ -269,7 +269,7 @@ class DNSAnalyzer:
             found_ips = re.findall(ip_pattern, output_to_parse)
 
             if not found_ips:
-                self.logger.warning(f"No IP addresses found in DNS response for {hostname}")
+                self.logger.warning("No IP addresses found in DNS response for %s", hostname)
                 return False  # No IP addresses found
 
             # Filter out DNS server IPs more carefully
@@ -282,7 +282,7 @@ class DNSAnalyzer:
             dns_server_ips = set()
             in_server_section = False
 
-            for i, line in enumerate(lines):
+            for line in lines:
                 line_lower = line.lower()
                 # Check if this line indicates DNS server info
                 if "server:" in line_lower:
@@ -303,7 +303,7 @@ class DNSAnalyzer:
             resolved_ips = [ip for ip in found_ips if ip not in dns_server_ips]
 
             if not resolved_ips:
-                self.logger.warning(f"Only DNS server IPs found for {hostname}, no actual resolution")
+                self.logger.warning("Only DNS server IPs found for %s, no actual resolution", hostname)
                 return False  # Only DNS server IPs found, no actual resolution
 
             # Check if any of the resolved IPs are private
@@ -314,13 +314,13 @@ class DNSAnalyzer:
                     if ip.is_private:
                         # Additional validation: private IPs for AKS API servers are typically in specific ranges
                         # Common AKS private IP ranges: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
-                        self.logger.info(f"DNS resolved {hostname} to private IP: {ip_str}")
+                        self.logger.info("DNS resolved %s to private IP: %s", hostname, ip_str)
                         return True
                 except ValueError:
                     continue  # Skip invalid IP addresses
 
             # If we found IP addresses but none were private, this indicates the issue
-            self.logger.warning(f"DNS resolved {hostname} to public IP(s): {resolved_ips}")
+            self.logger.warning("DNS resolved %s to public IP(s): %s", hostname, resolved_ips)
 
             # Create a finding for this issue
             from .models import FindingCode
@@ -344,7 +344,7 @@ class DNSAnalyzer:
             return False
 
         except Exception as e:
-            self.logger.error(f"Error validating DNS resolution for {hostname}: {e}")
+            self.logger.error("Error validating DNS resolution for %s: %s", hostname, e)
             # If we can't parse the output, be conservative and check for any error indicators
             dns_error_patterns = [
                 "nxdomain",

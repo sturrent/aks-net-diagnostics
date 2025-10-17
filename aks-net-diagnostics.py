@@ -190,16 +190,16 @@ EXAMPLES:
             subprocess.run(
                 ["az", "--version"], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS
             )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            raise FileNotFoundError("Azure CLI is not installed or not in PATH")
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            raise FileNotFoundError("Azure CLI is not installed or not in PATH") from exc
 
         # Check if logged in
         try:
             subprocess.run(
                 ["az", "account", "show"], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS
             )
-        except subprocess.CalledProcessError:
-            raise PermissionError("Not logged in to Azure. Run 'az login' first.")
+        except subprocess.CalledProcessError as exc:
+            raise PermissionError("Not logged in to Azure. Run 'az login' first.") from exc
 
         # Set subscription if provided
         if self.subscription:
@@ -211,11 +211,11 @@ EXAMPLES:
                     timeout=AZURE_CLI_TIMEOUT,
                     shell=IS_WINDOWS,
                 )
-                self.logger.info(f"Using Azure subscription: {self.subscription}")
+                self.logger.info("Using Azure subscription: %s", self.subscription)
                 # Update SDK client with the subscription
                 self.azure_sdk_client = AzureSDKClient(subscription_id=self.subscription)
-            except subprocess.CalledProcessError:
-                raise ValueError(f"Failed to set subscription: {self.subscription}")
+            except subprocess.CalledProcessError as exc:
+                raise ValueError(f"Failed to set subscription: {self.subscription}") from exc
         else:
             # Get current subscription from Azure SDK
             from azure.identity import DefaultAzureCredential
@@ -228,7 +228,7 @@ EXAMPLES:
             if subscriptions:
                 # Get the first subscription (default)
                 self.subscription = subscriptions[0].subscription_id
-                self.logger.info(f"Using Azure subscription: {self.subscription}")
+                self.logger.info("Using Azure subscription: %s", self.subscription)
                 # Update SDK client with the subscription
                 self.azure_sdk_client = AzureSDKClient(subscription_id=self.subscription)
 
@@ -292,13 +292,13 @@ EXAMPLES:
             nic_count = len(self.nsg_analysis.get("nicNsgs", []))
             blocking_count = len(self.nsg_analysis.get("blockingRules", []))
 
-            self.logger.info(f"  Subnet NSGs: {subnet_count}")
-            self.logger.info(f"  NIC NSGs: {nic_count}")
+            self.logger.info("  Subnet NSGs: %s", subnet_count)
+            self.logger.info("  NIC NSGs: %s", nic_count)
             if blocking_count > 0:
-                self.logger.warning(f"  Found {blocking_count} potential blocking rule(s)")
+                self.logger.warning("  Found %s potential blocking rule(s)", blocking_count)
 
         except Exception as e:
-            self.logger.error(f"Failed to analyze NSG configuration: {e}")
+            self.logger.error("Failed to analyze NSG configuration: %s", e)
             # Initialize with empty structure to prevent downstream errors
             self.nsg_analysis = {
                 "subnetNsgs": [],
@@ -331,7 +331,7 @@ EXAMPLES:
             self.dns_analyzer = dns_analyzer
 
         except Exception as e:
-            self.logger.error(f"Failed to analyze DNS configuration: {e}")
+            self.logger.error("Failed to analyze DNS configuration: %s", e)
             # Initialize with empty structure to prevent downstream errors
             self.private_dns_analysis = {
                 "type": "none",

@@ -129,16 +129,16 @@ class ReportGenerator:
         try:
             report_data = self.generate_json_report()
 
-            with open(filepath, "w") as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(report_data, f, indent=2)
 
             # Set secure file permissions
             os.chmod(filepath, file_permissions)
-            self.logger.info(f"[DOC] JSON report saved to: {filepath}")
+            self.logger.info("[DOC] JSON report saved to: %s", filepath)
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to save JSON report: {e}")
+            self.logger.error("Failed to save JSON report: %s", e)
             return False
 
     def print_console_report(self, show_details: bool = False, json_report_path: Optional[str] = None):

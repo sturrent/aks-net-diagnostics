@@ -35,18 +35,18 @@ class BaseAnalyzer(ABC):
         Returns:
             Analysis results as dictionary
         """
-        pass
+        raise NotImplementedError("Subclasses must implement analyze() method")
 
     def add_finding(self, finding: Finding):
         """Add a finding to the results"""
         self.findings.append(finding)
         # Map severity to appropriate log level and symbol
         if finding.severity.value in ["critical", "error"]:
-            self.logger.error(f"Finding: [X] {finding.message}")
+            self.logger.error("Finding: [X] %s", finding.message)
         elif finding.severity.value == "warning":
-            self.logger.warning(f"Finding: [!] {finding.message}")
+            self.logger.warning("Finding: [!] %s", finding.message)
         else:
-            self.logger.info(f"Finding: [i] {finding.message}")
+            self.logger.info("Finding: [i] %s", finding.message)
 
     def get_findings(self) -> List[Finding]:
         """Get all findings from this analyzer"""

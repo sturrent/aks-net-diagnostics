@@ -141,7 +141,7 @@ class ConnectivityTester:
             # List VMSS using SDK (replaces: az vmss list)
             vmss_list = list(self.sdk_client.compute_client.virtual_machine_scale_sets.list(mc_rg))
         except (ResourceNotFoundError, HttpResponseError) as exc:
-            self.logger.info(f"Error listing VMSS in {mc_rg}: {exc}")
+            self.logger.info("Error listing VMSS in %s: %s", mc_rg, exc)
             return instances
 
         for vmss in vmss_list:
@@ -153,7 +153,7 @@ class ConnectivityTester:
                 # List VMSS instances using SDK (replaces: az vmss list-instances)
                 vmss_nodes = list(self.sdk_client.compute_client.virtual_machine_scale_set_vms.list(mc_rg, vmss_name))
             except (ResourceNotFoundError, HttpResponseError) as exc:
-                self.logger.info(f"Error listing VMSS instances for {vmss_name}: {exc}")
+                self.logger.info("Error listing VMSS instances for %s: %s", vmss_name, exc)
                 continue
 
             # Find first running instance
@@ -238,7 +238,7 @@ class ConnectivityTester:
 
             # Check if this test should be skipped due to dependency failure
             if skip_group and skip_group in failed_tests:
-                self.logger.info(f"  Test: {test_name} - SKIPPED ({skip_group} failed)")
+                self.logger.info("  Test: %s - SKIPPED (%s failed)", test_name, skip_group)
                 result = {
                     "test_name": test_name,
                     "description": test["description"],
@@ -258,7 +258,7 @@ class ConnectivityTester:
                 self.probe_results["summary"]["errors"] += 1
                 continue
 
-            self.logger.info(f"  Running test: {test_name}")
+            self.logger.info("  Running test: %s", test_name)
             result = self._execute_vmss_test(vmss_instance, test)
             self.probe_results["tests"].append(result)
 
@@ -266,7 +266,7 @@ class ConnectivityTester:
             if result["status"] == "failed":
                 failed_tests.add(test_name)
                 if "DNS" in test_name:
-                    self.logger.warning(f"    {test_name} failed - dependent connectivity tests will be skipped")
+                    self.logger.warning("    %s failed - dependent connectivity tests will be skipped", test_name)
 
             # Log test results based on detail level
             # In detailed mode, show full JSON with compacted output
@@ -277,11 +277,11 @@ class ConnectivityTester:
                     log_result["stdout"] = log_result["stdout"].replace("\n", "\\n")
                 if log_result.get("stderr"):
                     log_result["stderr"] = log_result["stderr"].replace("\n", "\\n")
-                self.logger.info(f"    Test result: {json.dumps(log_result, indent=2)}")
+                self.logger.info("    Test result: %s", json.dumps(log_result, indent=2))
             else:
                 # In summary mode, just show summary
                 status = result["status"].upper()
-                self.logger.info(f"    Result: {status} - {result['analysis']}")
+                self.logger.info("    Result: %s - %s", status, result["analysis"])
 
             # Update summary
             self.probe_results["summary"]["total_tests"] += 1
@@ -358,11 +358,11 @@ class ConnectivityTester:
         except (ResourceNotFoundError, HttpResponseError) as e:
             result["analysis"] = f"Error executing test: {str(e)}"
             result["status"] = "error"
-            self.logger.debug(f"Test '{test['name']}' SDK error: {e}")
+            self.logger.debug("Test '%s' SDK error: %s", test["name"], e)
         except Exception as e:
             result["analysis"] = f"Error executing test: {str(e)}"
             result["status"] = "error"
-            self.logger.debug(f"Test '{test['name']}' error: {e}")
+            self.logger.debug("Test '%s' error: %s", test["name"], e)
 
         return result
 
@@ -497,7 +497,7 @@ class ConnectivityTester:
                 exit_code = 0
 
         except Exception as e:
-            self.logger.debug(f"Error parsing VMSS message: {e}")
+            self.logger.debug("Error parsing VMSS message: %s", e)
 
         return {"stdout": stdout, "stderr": stderr, "exit_code": exit_code}
 
@@ -518,9 +518,9 @@ class ConnectivityTester:
                 if keyword.lower() in combined_output:
                     return True
             return False
-        else:
-            # For other tests (like DNS), use only stdout
-            return self._check_expected_output(stdout, expected_keywords)
+
+        # For other tests (like DNS), use only stdout
+        return self._check_expected_output(stdout, expected_keywords)
 
     def _check_expected_output(self, output: str, expected_keywords: List[str]) -> bool:
         """Check if output contains expected keywords"""
@@ -601,7 +601,7 @@ class ConnectivityTester:
             return False
 
         except Exception as e:
-            self.logger.debug(f"Error validating private DNS resolution: {e}")
+            self.logger.debug("Error validating private DNS resolution: %s", e)
             # If we can't parse the output, be conservative
             dns_error_patterns = [
                 "nxdomain",

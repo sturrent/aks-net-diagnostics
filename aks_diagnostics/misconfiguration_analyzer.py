@@ -191,8 +191,7 @@ class MisconfigurationAnalyzer:
                     if error_message:
                         if error_code:
                             return (error_code, f"{error_code}: {error_message}")
-                        else:
-                            return (None, error_message)
+                        return (None, error_message)
 
                 provisioning_error = status.get("provisioningError")
                 if provisioning_error:
@@ -201,7 +200,7 @@ class MisconfigurationAnalyzer:
             return None
 
         except Exception as e:
-            self.logger.info(f"Could not retrieve cluster status error: {e}")
+            self.logger.info("Could not retrieve cluster status error: %s", e)
             return None
 
     def _analyze_private_dns_issues(
@@ -250,7 +249,7 @@ class MisconfigurationAnalyzer:
                     self._check_dns_server_vnet_links(zone_rg, zone_name, findings)
 
         except Exception as e:
-            self.logger.info(f"Could not analyze system private DNS issues: {e}")
+            self.logger.info("Could not analyze system private DNS issues: %s", e)
 
     def _check_dns_server_vnet_links(self, zone_rg: str, zone_name: str, findings: List[Dict[str, Any]]) -> None:
         """Check if VNets with custom DNS servers are properly linked to private DNS zone"""
@@ -286,9 +285,9 @@ class MisconfigurationAnalyzer:
                             )
 
         except (ResourceNotFoundError, HttpResponseError) as e:
-            self.logger.info(f"Could not check DNS server VNet links: {e}")
+            self.logger.info("Could not check DNS server VNet links: %s", e)
         except Exception as e:
-            self.logger.info(f"Could not check DNS server VNet links: {e}")
+            self.logger.info("Could not check DNS server VNet links: %s", e)
 
     def _get_cluster_vnets_with_dns(self) -> List[Dict[str, Any]]:
         """Get cluster VNets with their DNS configurations"""
@@ -323,7 +322,7 @@ class MisconfigurationAnalyzer:
                         continue
 
         except Exception as e:
-            self.logger.info(f"Could not find DNS server host VNet: {e}")
+            self.logger.info("Could not find DNS server host VNet: %s", e)
 
         return None
 
@@ -365,9 +364,9 @@ class MisconfigurationAnalyzer:
                             }
                         )
         except (ResourceNotFoundError, HttpResponseError) as e:
-            self.logger.info(f"Could not analyze private DNS VNet links: {e}")
+            self.logger.info("Could not analyze private DNS VNet links: %s", e)
         except Exception as e:
-            self.logger.info(f"Could not analyze private DNS VNet links: {e}")
+            self.logger.info("Could not analyze private DNS VNet links: %s", e)
 
     def _find_private_dns_zone_rg(self, zone_name: str) -> str:
         """Find the resource group containing the private DNS zone"""
@@ -403,7 +402,7 @@ class MisconfigurationAnalyzer:
     def _analyze_vnet_issues(self, vmss_analysis: List[Dict[str, Any]], findings: List[Dict[str, Any]]) -> None:
         """Analyze VNet configuration issues"""
         # Placeholder for future VNet subnet capacity analysis
-        pass
+        # TODO: Implement VNet subnet capacity analysis
 
     def _analyze_udr_issues(self, outbound_analysis: Dict[str, Any], findings: List[Dict[str, Any]]) -> None:
         """Analyze User Defined Route configuration issues"""

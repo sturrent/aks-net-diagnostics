@@ -69,13 +69,13 @@ class ClusterDataCollector:
                         cluster_result["status"] = {}
                     cluster_result["status"]["provisioningError"] = cluster.status.provisioning_error
 
-        except ResourceNotFoundError:
+        except ResourceNotFoundError as exc:
             raise ValueError(
                 f"Cluster '{cluster_name}' not found in resource group '{resource_group}'. "
                 f"Please check the cluster name and resource group."
-            )
+            ) from exc
         except HttpResponseError as e:
-            raise ValueError(f"Failed to get cluster information for {cluster_name}: {e.message}")
+            raise ValueError(f"Failed to get cluster information for {cluster_name}: {e.message}") from e
 
         if not cluster_result or not isinstance(cluster_result, dict):
             raise ValueError(
@@ -91,7 +91,7 @@ class ClusterDataCollector:
             agent_pools = [normalize_dict_keys(pool.as_dict()) for pool in agent_pools_list]
 
         except (ResourceNotFoundError, HttpResponseError) as e:
-            self.logger.warning(f"Failed to retrieve agent pools: {e}")
+            self.logger.warning("Failed to retrieve agent pools: %s", e)
             agent_pools = []
 
         return {"cluster_info": cluster_result, "agent_pools": agent_pools}
@@ -171,7 +171,7 @@ class ClusterDataCollector:
                         )
 
                 except (ResourceNotFoundError, HttpResponseError) as e:
-                    self.logger.warning(f"Failed to retrieve VNet {vnet_name}: {e}")
+                    self.logger.warning("Failed to retrieve VNet %s: %s", vnet_name, e)
                     continue
 
         return list(vnets_map.values())
@@ -197,7 +197,7 @@ class ClusterDataCollector:
             # List VMSS in the managed resource group using SDK (replaces: az vmss list)
             vmss_list = list(self.sdk_client.compute_client.virtual_machine_scale_sets.list(mc_rg))
         except (ResourceNotFoundError, HttpResponseError) as e:
-            self.logger.warning(f"Failed to list VMSS in {mc_rg}: {e}")
+            self.logger.warning("Failed to list VMSS in %s: %s", mc_rg, e)
             return []
 
         vmss_analysis = []
@@ -206,7 +206,7 @@ class ClusterDataCollector:
             if not vmss_name:
                 continue
 
-            self.logger.info(f"  - Analyzing VMSS: {vmss_name}")
+            self.logger.info("  - Analyzing VMSS: %s", vmss_name)
 
             try:
                 # Get VMSS details using SDK (replaces: az vmss show)
@@ -230,14 +230,14 @@ class ClusterDataCollector:
 
                 # Log unique subnets only once per VMSS
                 for subnet_name in sorted(unique_subnets):
-                    self.logger.info(f"    Found subnet: {subnet_name}")
+                    self.logger.info("    Found subnet: %s", subnet_name)
 
                 # Store VMSS info with proper structure for NSG analyzer
                 # NSG analyzer expects the full VMSS detail with virtualMachineProfile
                 vmss_analysis.append(vmss_detail_dict)
 
             except (ResourceNotFoundError, HttpResponseError) as e:
-                self.logger.warning(f"Failed to get details for VMSS {vmss_name}: {e}")
+                self.logger.warning("Failed to get details for VMSS %s: %s", vmss_name, e)
                 continue
 
         return vmss_analysis

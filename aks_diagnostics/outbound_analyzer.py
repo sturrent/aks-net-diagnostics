@@ -180,13 +180,11 @@ class OutboundConnectivityAnalyzer:
                 if virtual_appliance_routes:
                     # Collect all virtual appliance IPs from routes
                     appliance_ips = list(
-                        set(
-                            [
-                                r.get("nextHopIpAddress", "unknown")
-                                for r in virtual_appliance_routes
-                                if r.get("nextHopIpAddress")
-                            ]
-                        )
+                        {
+                            r.get("nextHopIpAddress", "unknown")
+                            for r in virtual_appliance_routes
+                            if r.get("nextHopIpAddress")
+                        }
                     )
                     effective_summary["virtual_appliance_ips"] = appliance_ips
                     effective_summary["description"] = (
@@ -221,7 +219,7 @@ class OutboundConnectivityAnalyzer:
         description = effective_summary["description"]
 
         if effective_summary["overridden_by_udr"]:
-            self.logger.warning(f"  [!]  {description}")
+            self.logger.warning("  [!]  %s", description)
             if effective_summary["load_balancer_ips"]:
                 self.logger.warning(
                     f"    Load Balancer IPs (not effective): {', '.join(effective_summary['load_balancer_ips'])}"
@@ -229,22 +227,22 @@ class OutboundConnectivityAnalyzer:
         else:
             if mechanism == "loadBalancer" and effective_summary["load_balancer_ips"]:
                 for ip in effective_summary["load_balancer_ips"]:
-                    self.logger.info(f"    Found outbound IP: {ip}")
+                    self.logger.info("    Found outbound IP: %s", ip)
             elif mechanism == "virtualAppliance" and effective_summary["virtual_appliance_ips"]:
                 for ip in effective_summary["virtual_appliance_ips"]:
-                    self.logger.info(f"    Virtual appliance IP: {ip}")
+                    self.logger.info("    Virtual appliance IP: %s", ip)
             elif mechanism == "managedNATGateway" and effective_summary["load_balancer_ips"]:
                 for ip in effective_summary["load_balancer_ips"]:
-                    self.logger.info(f"    NAT Gateway outbound IP: {ip}")
+                    self.logger.info("    NAT Gateway outbound IP: %s", ip)
 
         # Display warnings
         for warning in effective_summary.get("warnings", []):
             level = warning["level"]
             message = warning["message"]
             if level == "error":
-                self.logger.error(f"    [ERROR] {message}")
+                self.logger.error("    [ERROR] %s", message)
             else:
-                self.logger.warning(f"    [!]  {message}")
+                self.logger.warning("    [!]  %s", message)
 
     def _analyze_load_balancer_outbound(self, show_details: bool = False) -> None:
         """
@@ -268,11 +266,11 @@ class OutboundConnectivityAnalyzer:
 
             if not load_balancers_list:
                 if show_details:
-                    self.logger.info(f"    No load balancers found in {mc_rg}")
+                    self.logger.info("    No load balancers found in %s", mc_rg)
                 return
 
         except (ResourceNotFoundError, HttpResponseError) as e:
-            self.logger.warning(f"Failed to list load balancers in {mc_rg}: {e}")
+            self.logger.warning("Failed to list load balancers in %s: %s", mc_rg, e)
             return
 
         # Process load balancers quietly and only report the final results
@@ -329,7 +327,7 @@ class OutboundConnectivityAnalyzer:
                                         self.outbound_ips.append(ip_address)
 
                     except (ResourceNotFoundError, HttpResponseError) as e:
-                        self.logger.debug(f"Failed to get frontend config {config_name}: {e}")
+                        self.logger.debug("Failed to get frontend config %s: %s", config_name, e)
                         continue
 
         # Summary of outbound IP discovery will be handled by _display_outbound_summary
@@ -375,11 +373,11 @@ class OutboundConnectivityAnalyzer:
 
             if not nat_gateways_list:
                 if show_details:
-                    self.logger.info(f"    No NAT Gateways found in {mc_rg}")
+                    self.logger.info("    No NAT Gateways found in %s", mc_rg)
                 return
 
         except (ResourceNotFoundError, HttpResponseError) as e:
-            self.logger.warning(f"Failed to list NAT Gateways in {mc_rg}: {e}")
+            self.logger.warning("Failed to list NAT Gateways in %s: %s", mc_rg, e)
             return
 
         # Process each NAT Gateway
@@ -388,7 +386,7 @@ class OutboundConnectivityAnalyzer:
             if not natgw_name:
                 continue
 
-            self.logger.info(f"    Found NAT Gateway: {natgw_name}")
+            self.logger.info("    Found NAT Gateway: %s", natgw_name)
 
             # Get public IP prefixes and public IPs associated with this NAT Gateway
             public_ip_prefixes = natgw.public_ip_prefixes or []
@@ -404,7 +402,7 @@ class OutboundConnectivityAnalyzer:
                         if ip_address:
                             self.outbound_ips.append(ip_address)
                             if show_details:
-                                self.logger.info(f"      Public IP: {ip_address}")
+                                self.logger.info("      Public IP: %s", ip_address)
 
             # Extract IPs from public IP prefixes
             for prefix_ref in public_ip_prefixes:
@@ -416,7 +414,7 @@ class OutboundConnectivityAnalyzer:
                         if ip_prefix:
                             # For prefixes, we'll note the range but also try to get individual IPs
                             if show_details:
-                                self.logger.info(f"      Public IP Prefix: {ip_prefix}")
+                                self.logger.info("      Public IP Prefix: %s", ip_prefix)
                             # Extract the first IP from the prefix for outbound IP tracking
                             try:
                                 import ipaddress
@@ -464,10 +462,10 @@ class OutboundConnectivityAnalyzer:
             return normalize_dict_keys(public_ip.as_dict())
 
         except (ResourceNotFoundError, HttpResponseError) as e:
-            self.logger.debug(f"Error getting public IP details for {public_ip_id}: {e}")
+            self.logger.debug("Error getting public IP details for %s: %s", public_ip_id, e)
             return None
         except Exception as e:
-            self.logger.debug(f"Error parsing public IP ID {public_ip_id}: {e}")
+            self.logger.debug("Error parsing public IP ID %s: %s", public_ip_id, e)
             return None
 
     def _get_public_ip_prefix_details(self, prefix_id: str) -> Optional[Dict[str, Any]]:
@@ -504,8 +502,8 @@ class OutboundConnectivityAnalyzer:
             return normalize_dict_keys(public_ip_prefix.as_dict())
 
         except (ResourceNotFoundError, HttpResponseError) as e:
-            self.logger.debug(f"Error getting public IP prefix details for {prefix_id}: {e}")
+            self.logger.debug("Error getting public IP prefix details for %s: %s", prefix_id, e)
             return None
         except Exception as e:
-            self.logger.debug(f"Error parsing public IP prefix ID {prefix_id}: {e}")
+            self.logger.debug("Error parsing public IP prefix ID %s: %s", prefix_id, e)
             return None

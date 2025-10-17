@@ -88,9 +88,9 @@ class APIServerAccessAnalyzer:
             self.analysis_result["analysis"]["ipRangeRestriction"] = "none"
             return
 
-        self.logger.info(f"  - Found {len(authorized_ranges)} authorized IP range(s):")
+        self.logger.info("  - Found %s authorized IP range(s):", len(authorized_ranges))
         for range_cidr in authorized_ranges:
-            self.logger.info(f"    * {range_cidr}")
+            self.logger.info("    * %s", range_cidr)
 
         self.analysis_result["analysis"]["ipRangeRestriction"] = "enabled"
         self.analysis_result["analysis"]["rangeCount"] = len(authorized_ranges)
@@ -156,14 +156,14 @@ class APIServerAccessAnalyzer:
                     }
                 )
             elif prefix_length >= 32:  # Single IP
-                self.logger.debug(f"    [OK] Specific IP address: {range_cidr}")
+                self.logger.debug("    [OK] Specific IP address: %s", range_cidr)
             else:  # Reasonable range
-                self.logger.debug(f"    [OK] Reasonable range: {range_cidr} ({num_addresses} addresses)")
+                self.logger.debug("    [OK] Reasonable range: %s (%s addresses)", range_cidr, num_addresses)
 
             # Check for private IP ranges in authorized list
             if network.is_private:
                 self.analysis_result["analysis"]["containsPrivateRanges"] = True
-                self.logger.debug(f"    [NOTE] Private IP range detected: {range_cidr}")
+                self.logger.debug("    [NOTE] Private IP range detected: %s", range_cidr)
 
         except Exception as e:
             self.analysis_result["securityFindings"].append(
@@ -327,7 +327,7 @@ class APIServerAccessAnalyzer:
                     network = ipaddress.ip_network(range_cidr, strict=False)
                     authorized_networks.append(network)
                 except Exception as e:
-                    self.logger.debug(f"Could not parse authorized range {range_cidr}: {e}")
+                    self.logger.debug("Could not parse authorized range %s: %s", range_cidr, e)
 
             # Check each outbound IP
             unauthorized_ips = []
@@ -345,7 +345,7 @@ class APIServerAccessAnalyzer:
                     if not is_authorized:
                         unauthorized_ips.append(ip_str)
                 except Exception as e:
-                    self.logger.debug(f"Could not parse outbound IP {ip_str}: {e}")
+                    self.logger.debug("Could not parse outbound IP %s: %s", ip_str, e)
 
             # Report findings
             if unauthorized_ips:
@@ -373,7 +373,7 @@ class APIServerAccessAnalyzer:
                     )
 
         except Exception as e:
-            self.logger.debug(f"Error checking outbound IP authorization: {e}")
+            self.logger.debug("Error checking outbound IP authorization: %s", e)
             implications.append(f"[NOTE] Could not validate outbound IP authorization: {e}")
 
         return implications
