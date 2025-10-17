@@ -586,13 +586,13 @@ class ReportGenerator:
             # Display findings summary
             print("**Findings Summary:**")
             if critical_count > 0:
-                print(f"- [CRITICAL] {critical_count} Critical issue(s)")
+                print(f"- [CRITICAL] {critical_count}")
             if error_count > 0:
-                print(f"- [ERROR] {error_count} Error issue(s)")
+                print(f"- [ERROR] {error_count}")
             if warning_count > 0:
-                print(f"- [WARNING] {warning_count} Warning issue(s)")
+                print(f"- [WARNING] {warning_count}")
             if info_count > 0:
-                print(f"- [INFO] {info_count} Informational finding(s)")
+                print(f"- [INFO] {info_count}")
             print()
 
             # Display all findings in detail
