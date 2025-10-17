@@ -5,6 +5,22 @@ All notable changes to the AKS Network Diagnostics tool will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Linux/Mac Development Support**: Full cross-platform development tooling
+  - Added `tools/check_quality.sh` for Linux/Mac quality checks
+  - Created `tools/` directory for development scripts organization
+  - Added `tools/README.md` with comprehensive tool documentation
+  - Added `docs/LINUX_DEV_SETUP.md` migration guide for porting changes across branches
+
+### Changed
+- **Repository Organization**: Improved project structure
+  - Moved `build_zipapp.py` to `tools/build_zipapp.py`
+  - Moved `check_quality.ps1` to `tools/check_quality.ps1`
+  - Updated all documentation to reference new `tools/` paths
+  - Fixed encoding issues in `docs/PRE_PUSH_HOOK.md`
+
 ## [2.0.0] - 2025-10-15
 
 ### Changed

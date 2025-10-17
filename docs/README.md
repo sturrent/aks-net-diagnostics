@@ -57,7 +57,7 @@ Essential documentation for all users:
 - **[README.md](../README.md)** - Getting started, usage, features
 - **[CHANGELOG.md](../CHANGELOG.md)** - Version history and changes
 - **[CONTRIBUTING.md](../CONTRIBUTING.md)** - Contribution guidelines
-- **[ARCHITECTURE.md](../ARCHITECTURE.md)** - Technical architecture overview
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Technical architecture overview
 
 ### Migration Documentation (`migration/`)
 
@@ -81,7 +81,7 @@ Documentation about this branch's organization:
 ### For Users
 
 - **Getting Started**: See [../README.md](../README.md)
-- **Understanding the Tool**: See [../ARCHITECTURE.md](../ARCHITECTURE.md)
+- **Understanding the Tool**: See [ARCHITECTURE.md](ARCHITECTURE.md)
 - **Contributing**: See [../CONTRIBUTING.md](../CONTRIBUTING.md)
 
 ### For Developers

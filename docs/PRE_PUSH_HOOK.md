@@ -45,7 +45,7 @@ Running Pylint (code quality)...
 Running Pytest (unit tests)...
 ✅ Pytest (unit tests) PASSED
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+═══════════════════════════════════════════════════
 ✅ All critical checks passed! Pushing to remote...
 ```
 
@@ -55,7 +55,7 @@ When a check fails:
 Running Flake8 (PEP8 style)...
 ❌ Flake8 (PEP8 style) FAILED
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+═══════════════════════════════════════════════════
 ❌ Critical checks failed! Push aborted.
 
 Fix the issues above and try again.
@@ -76,37 +76,70 @@ git push --no-verify
 
 Test the hook without pushing:
 
-```powershell
+```bash
+# Linux/Mac
+.git/hooks/pre-push
+
+# Windows
 .git\hooks\pre-push.ps1
 ```
 
 Or use the convenience script:
 
-```powershell
-.\check_quality.ps1
+```bash
+# Linux/Mac
+./tools/check_quality.sh
+
+# Windows
+.\tools\check_quality.ps1
 ```
 
 ## Troubleshooting
 
 ### Hook doesn't run
 
-- Verify the file exists: `.git\hooks\pre-push`
-- Check PowerShell script exists: `.git\hooks\pre-push.ps1`
+- Verify the file exists: `.git/hooks/pre-push`
+- Check script exists: `.git/hooks/pre-push.ps1` (Windows) or ensure pre-push is executable (Linux/Mac)
+- Check file permissions (Linux/Mac): `chmod +x .git/hooks/pre-push`
 
 ### Virtual environment not found
 
-The hook will attempt to activate `venv\Scripts\Activate.ps1`. If your virtual environment is elsewhere, ensure it's already activated before pushing.
+The hook looks for a virtual environment in these locations (in order):
+1. `./venv/`
+2. `./.venv/`
+3. System Python
 
-### Tests fail
+If you use a different location, update the hook script.
 
-Run pytest manually to see detailed output:
+### Tests fail unexpectedly
 
-```powershell
+```bash
+# Make sure dependencies are installed
+pip install -r dev-requirements.txt
+
+# Run tests manually to see detailed output
 pytest -v
 ```
 
+### Performance issues
+
+If the hook is too slow:
+- The hook runs the full test suite - consider using `pytest -x` (stop at first failure) for faster feedback
+- Or modify the hook to skip tests during push and rely on CI
+
 ## Related Documentation
 
-- [DEVELOPMENT.md](../DEVELOPMENT.md) - Development setup and workflow
-- [check_quality.ps1](../check_quality.ps1) - Manual quality check script
+- [DEVELOPMENT.md](DEVELOPMENT.md) - Development setup and workflow
+- [Quality Check Scripts](../tools/) - Manual quality check scripts
 - [.github/workflows/ci.yml](../.github/workflows/ci.yml) - GitHub Actions CI workflow
+
+## How It Works
+
+The pre-push hook:
+1. Detects if you're in a git repository
+2. Activates the virtual environment (if available)
+3. Runs each quality check in sequence
+4. Blocks the push if any critical check fails
+5. Allows warnings (like Pylint suggestions) but doesn't block
+
+The hook script is located at `.git/hooks/pre-push` and is automatically triggered by Git before any push operation.

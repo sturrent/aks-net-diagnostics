@@ -156,13 +156,13 @@ Before submitting your pull request:
 - [ ] Type hints added for all functions
 - [ ] Docstrings added for public methods
 - [ ] Tests added/updated and passing
-- [ ] Documentation updated (README.md, ARCHITECTURE.md if applicable)
+- [ ] Documentation updated (README.md, docs/ARCHITECTURE.md if applicable)
 - [ ] `.pyz` build tested (if modifying core functionality)
 - [ ] No breaking changes (or clearly documented if unavoidable)
 - [ ] Commit messages follow conventional commits format
 - [ ] No merge conflicts with main branch
 
-**Note:** The repository includes a **pre-push git hook** that automatically runs these checks. If you've cloned the repository, the hook will run automatically before each push. You can also run `.\check_quality.ps1` manually to check everything at once.
+**Note:** The repository includes a **pre-push git hook** that automatically runs these checks. If you've cloned the repository, the hook will run automatically before each push. You can also run `./tools/check_quality.sh` (Linux/Mac) or `.\tools\check_quality.ps1` (Windows) manually to check everything at once.
 
 ### Automated Checks
 
@@ -199,8 +199,8 @@ When you open a pull request, GitHub Actions will automatically run:
 **Pull requests require passing CI checks before they can be merged.**
 
 You can view the CI configuration in [.github/workflows/ci.yml](.github/workflows/ci.yml).
-- [ ] Documentation updated (README.md, ARCHITECTURE.md if applicable)
-- [ ] `.pyz` build tested (`python build_zipapp.py && python aks-net-diagnostics.pyz --help`)
+- [ ] Documentation updated (README.md, docs/ARCHITECTURE.md if applicable)
+- [ ] `.pyz` build tested (`python tools/build_zipapp.py && python aks-net-diagnostics.pyz --help`)
 - [ ] No breaking changes (or clearly documented if unavoidable)
 
 ## Building the Distribution
@@ -211,7 +211,7 @@ The project uses Python's `zipapp` module to create a single-file executable:
 
 ```bash
 # Build the .pyz file
-python build_zipapp.py
+python tools/build_zipapp.py
 
 # Verify it works
 python aks-net-diagnostics.pyz --help
@@ -225,14 +225,16 @@ python aks-net-diagnostics.pyz -n myCluster -g myRG
 Before submitting a PR that modifies core functionality:
 
 ```bash
+```bash
 # 1. Build the zipapp
-python build_zipapp.py
+python tools/build_zipapp.py
 
 # 2. Run unit tests on source code
 pytest -v
 
 # 3. Test the .pyz file functionality
 python aks-net-diagnostics.pyz --help
+```
 python aks-net-diagnostics.pyz -n test-cluster -g test-rg  # If you have test resources
 
 # 4. Verify file size is reasonable (~57 KB)

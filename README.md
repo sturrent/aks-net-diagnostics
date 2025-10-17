@@ -108,7 +108,7 @@ To create the single-file distribution:
 
 ```bash
 pip install -r requirements.txt  # Install dependencies first
-python build_zipapp.py
+python tools/build_zipapp.py
 # Creates: aks-net-diagnostics.pyz (~58 KB with Azure SDK)
 ```
 
@@ -167,7 +167,7 @@ The tool uses a **modular architecture** with specialized analyzers:
 
 **Key Modules**: NSGAnalyzer, DNSAnalyzer, RouteTableAnalyzer, APIServerAccessAnalyzer, ConnectivityTester, OutboundConnectivityAnalyzer
 
-For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)
+For detailed architecture documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Common Issues Detected
 
@@ -427,7 +427,7 @@ This project uses automated code quality tools and testing:
 
 **For contributors:**
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and setup
-- See [DEVELOPMENT.md](DEVELOPMENT.md) for development environment setup
+- See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for development environment setup
 - See [docs/PRE_PUSH_HOOK.md](docs/PRE_PUSH_HOOK.md) for git hook details
 
 **Quality Standards:**
@@ -436,7 +436,7 @@ This project uses automated code quality tools and testing:
 - 120 character line length
 - Full type hints and docstrings
 
-For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
+For architecture details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Troubleshooting
 
