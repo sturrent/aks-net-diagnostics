@@ -141,7 +141,30 @@ isort --check-only .
 isort .
 ```
 
-### 5. Running Tests
+### 5. Running All Quality Checks
+
+For convenience, the project includes automated scripts that run all quality checks in sequence:
+
+#### Linux/macOS
+```bash
+./tools/check_quality.sh
+```
+
+#### Windows (PowerShell)
+```powershell
+.\tools\check_quality.ps1
+```
+
+These scripts run:
+- **Black** (code formatting)
+- **isort** (import sorting)
+- **Flake8** (PEP8 style checking)
+- **Pylint** (code quality analysis)
+- **Pytest** (unit tests)
+
+The scripts provide colored output and stop on first failure. See [tools/README.md](../tools/README.md) for more details.
+
+### 6. Running Tests
 
 ```bash
 # Run all tests
@@ -163,7 +186,7 @@ pytest --cov=aks_diagnostics --cov-report=html
 
 **Test Coverage:** Aim for 80%+ coverage on new code.
 
-### 6. Automated Quality Checks
+### 7. Automated Quality Checks
 
 #### Pre-Push Git Hook
 
