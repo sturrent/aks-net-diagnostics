@@ -7,23 +7,18 @@ Version: 1.0.0
 """
 
 import argparse
-import json
 import logging
 import os
-import re
-import stat
 import subprocess
 import sys
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from aks_diagnostics.__version__ import __version__
 from aks_diagnostics.api_server_analyzer import APIServerAccessAnalyzer
 from aks_diagnostics.azure_cli import AzureCLIExecutor
 from aks_diagnostics.cluster_data_collector import ClusterDataCollector
-from aks_diagnostics.connectivity_tester import ConnectivityTester, VMSSInstance
+from aks_diagnostics.connectivity_tester import ConnectivityTester
 from aks_diagnostics.dns_analyzer import DNSAnalyzer
 from aks_diagnostics.exceptions import ValidationError
 from aks_diagnostics.misconfiguration_analyzer import MisconfigurationAnalyzer
@@ -353,7 +348,7 @@ EXAMPLES:
 
             response = urllib.request.urlopen("https://api.ipify.org", timeout=5)
             return response.read().decode("utf-8").strip()
-        except:
+        except Exception:
             return None
 
     def check_api_connectivity(self):

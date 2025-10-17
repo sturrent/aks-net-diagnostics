@@ -3,7 +3,6 @@ Unit tests for validators module
 """
 
 import unittest
-from pathlib import Path
 
 from aks_diagnostics.exceptions import ValidationError
 from aks_diagnostics.validators import InputValidator
@@ -26,7 +25,7 @@ class TestInputValidator(unittest.TestCase):
         """Test invalid Azure CLI commands"""
         invalid_commands = [
             [],  # Empty
-            ["rm", "-rf", "/"],  # Disallowed command
+            ["rm", "-r", "/"],  # Disallowed command
             ["aks", "show", "-n", "test; rm -rf /"],  # Injection attempt
             ["aks", "show", "$(malicious)"],  # Command substitution
         ]

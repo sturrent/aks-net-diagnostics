@@ -14,7 +14,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -408,9 +408,7 @@ class ConnectivityTester:
             r"Could not resolve host",
         ]
 
-        has_curl_error = False
         if result["stderr"]:
-            stderr_lower = result["stderr"].lower()
             for pattern in curl_error_patterns:
                 if re.search(pattern, result["stderr"], re.IGNORECASE):
                     has_curl_error = True

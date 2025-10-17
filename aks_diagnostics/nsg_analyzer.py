@@ -5,11 +5,11 @@ This module analyzes Network Security Groups (NSGs) associated with AKS clusters
 checking for misconfigurations, blocking rules, and compliance with AKS requirements.
 """
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Set
 
 from .base_analyzer import BaseAnalyzer
 from .exceptions import AzureCLIError
-from .models import Finding, FindingCode, Severity
+from .models import Finding, FindingCode
 
 
 class NSGAnalyzer(BaseAnalyzer):
@@ -349,7 +349,7 @@ class NSGAnalyzer(BaseAnalyzer):
                                     Finding.create_warning(
                                         FindingCode.NSG_POTENTIAL_BLOCK,
                                         message=f"NSG rule '{rule.get('name')}' in '{nsg_name}' may block AKS traffic but is overridden",
-                                        recommendation=f"Verify that override rules are correctly configured",
+                                        recommendation="Verify that override rules are correctly configured",
                                         **blocking_rule,
                                     )
                                 )

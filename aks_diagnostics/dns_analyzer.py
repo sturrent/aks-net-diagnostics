@@ -185,11 +185,11 @@ class DNSAnalyzer:
                         code=FindingCode.PRIVATE_DNS_MISCONFIGURED,
                         message=f"Private cluster is using custom DNS servers ({', '.join(non_azure_dns)}) that cannot resolve Azure private DNS zones",
                         recommendation=(
-                            f"For private clusters, ensure custom DNS servers forward Azure private DNS zone queries to Azure DNS (168.63.129.16). "
+                            "For private clusters, ensure custom DNS servers forward Azure private DNS zone queries to Azure DNS (168.63.129.16). "
                             f"Current DNS servers: {', '.join(dns_servers)}. "
-                            f"Either: (1) Configure DNS forwarding to 168.63.129.16 for '*.privatelink.*.azmk8s.io', "
-                            f"(2) Use Azure DNS as primary DNS server, or "
-                            f"(3) Configure conditional forwarding in your custom DNS solution."
+                            "Either: (1) Configure DNS forwarding to 168.63.129.16 for '*.privatelink.*.azmk8s.io', "
+                            "(2) Use Azure DNS as primary DNS server, or "
+                            "(3) Configure conditional forwarding in your custom DNS solution."
                         ),
                         vnetName=vnet_name,
                         vnetResourceGroup=vnet_rg,
@@ -198,7 +198,7 @@ class DNSAnalyzer:
                         privateDnsZone=self.dns_analysis.get("privateDnsZone"),
                     )
                 )
-                self.logger.warning(f"  [X] Custom DNS servers may prevent private DNS resolution")
+                self.logger.warning("  [X] Custom DNS servers may prevent private DNS resolution")
 
             elif non_azure_dns and not is_private_cluster:
                 # Public cluster with custom DNS - medium risk (CoreDNS may have issues)
@@ -209,12 +209,12 @@ class DNSAnalyzer:
                         code=FindingCode.DNS_RESOLUTION_FAILED,
                         message=f"VNet is using custom DNS servers ({', '.join(non_azure_dns)}) which may impact CoreDNS functionality",
                         recommendation=(
-                            f"Custom DNS servers should forward Azure service queries to Azure DNS (168.63.129.16). "
+                            "Custom DNS servers should forward Azure service queries to Azure DNS (168.63.129.16). "
                             f"Current DNS servers: {', '.join(dns_servers)}. "
-                            f"If experiencing DNS resolution issues, verify that:\n"
-                            f"1. Custom DNS can reach Azure DNS (168.63.129.16)\n"
-                            f"2. Azure-specific domains are forwarded correctly\n"
-                            f"3. DNS forwarding is configured for '*.azmk8s.io' and other Azure services"
+                            "If experiencing DNS resolution issues, verify that:\n"
+                            "1. Custom DNS can reach Azure DNS (168.63.129.16)\n"
+                            "2. Azure-specific domains are forwarded correctly\n"
+                            "3. DNS forwarding is configured for '*.azmk8s.io' and other Azure services"
                         ),
                         vnetName=vnet_name,
                         vnetResourceGroup=vnet_rg,
@@ -222,11 +222,11 @@ class DNSAnalyzer:
                         hasAzureDns=has_azure_dns,
                     )
                 )
-                self.logger.warning(f"  [!] Custom DNS may impact CoreDNS and Azure service resolution")
+                self.logger.warning("  [!] Custom DNS may impact CoreDNS and Azure service resolution")
 
             elif has_azure_dns and len(dns_servers) > 1:
                 # Mix of Azure DNS and custom DNS - informational
-                self.logger.info(f"  VNet uses Azure DNS along with custom DNS servers")
+                self.logger.info("  VNet uses Azure DNS along with custom DNS servers")
 
         except Exception as e:
             self.logger.error(f"  Failed to analyze VNet DNS configuration: {e}")

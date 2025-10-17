@@ -3,7 +3,6 @@ Unit tests for DNS Analyzer
 """
 
 import unittest
-from unittest.mock import Mock, patch
 
 from aks_diagnostics.dns_analyzer import DNSAnalyzer
 from aks_diagnostics.models import Finding, Severity

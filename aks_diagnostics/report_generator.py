@@ -9,7 +9,6 @@ This module handles generating and formatting diagnostic reports in multiple for
 import json
 import logging
 import os
-import stat
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -157,7 +156,7 @@ class ReportGenerator:
         else:
             self._print_summary_report(json_report_path)
 
-        print(f"\n[OK] AKS network assessment completed successfully!")
+        print("\n[OK] AKS network assessment completed successfully!")
 
     def _print_summary_report(self, json_report_path: Optional[str] = None):
         """Print summary report"""
@@ -388,7 +387,7 @@ class ReportGenerator:
                         r for r in rt.get("routes", []) if r.get("impact", {}).get("severity") in ["critical", "high"]
                     ]
                     if critical_routes:
-                        print(f"  - **Critical Routes:**")
+                        print("  - **Critical Routes:**")
                         for route in critical_routes:
                             impact = route.get("impact", {})
                             print(
@@ -455,10 +454,10 @@ class ReportGenerator:
                         if test_copy.get("stderr"):
                             test_copy["stderr"] = test_copy["stderr"].replace("\n", "\\n")
 
-                        print(f"  - **Full Test Result:**")
-                        print(f"    ```json")
+                        print("  - **Full Test Result:**")
+                        print("    ```json")
                         print(f"    {json.dumps(test_copy, indent=2)}")
-                        print(f"    ```")
+                        print("    ```")
                 print()
 
     def _print_nsg_analysis(self):
@@ -506,7 +505,7 @@ class ReportGenerator:
 
                 # Show custom rules
                 if custom_rules > 0 and nsg.get("rules"):
-                    print(f"  - **Custom Rules:**")
+                    print("  - **Custom Rules:**")
                     for rule in nsg.get("rules", []):
                         self._print_nsg_rule(rule)
 
@@ -539,7 +538,7 @@ class ReportGenerator:
 
                 # Show custom rules if any
                 if custom_rules > 0 and nsg.get("rules"):
-                    print(f"  - **Custom Rules:**")
+                    print("  - **Custom Rules:**")
                     for rule in nsg.get("rules", []):
                         self._print_nsg_rule(rule)
 

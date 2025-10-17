@@ -3,7 +3,7 @@ Unit tests for ClusterDataCollector module
 """
 
 import unittest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from aks_diagnostics.cluster_data_collector import ClusterDataCollector
 
@@ -94,6 +94,8 @@ class TestClusterDataCollector(unittest.TestCase):
         self.assertEqual(result, [])
         self.mock_logger.info.assert_called()
         # Verify the log message about AKS-managed VNet
+        from unittest.mock import call
+
         log_calls = [str(call) for call in self.mock_logger.info.call_args_list]
         self.assertTrue(any("AKS-managed VNet" in str(call) for call in log_calls))
 

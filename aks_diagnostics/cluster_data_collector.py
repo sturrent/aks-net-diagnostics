@@ -49,7 +49,7 @@ class ClusterDataCollector:
         if not cluster_result or not isinstance(cluster_result, dict):
             raise ValueError(
                 f"Failed to get cluster information for {cluster_name}. "
-                f"Please check the cluster name and resource group."
+                "Please check the cluster name and resource group."
             )
 
         # Get agent pools

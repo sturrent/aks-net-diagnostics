@@ -3,7 +3,6 @@ Unit tests for API Server Access Analyzer
 """
 
 import unittest
-from unittest.mock import MagicMock
 
 from aks_diagnostics.api_server_analyzer import APIServerAccessAnalyzer
 
