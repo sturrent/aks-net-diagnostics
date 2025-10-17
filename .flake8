@@ -1,0 +1,51 @@
+[flake8][flake8]
+
+max-line-length = 120max-line-length = 120
+
+exclude =exclude =
+
+    .git,    .git,
+
+    __pycache__,    __pycache__,
+
+    venv,    venv,
+
+    env,    env,
+
+    .venv,    .venv,
+
+    .env,    .env,
+
+    build,    build,
+
+    dist,    dist,
+
+    *.egg-info,    *.egg-info,
+
+    .tox,    .tox,
+
+    .pytest_cache    .pytest_cache
+
+
+
+ignore =ignore =
+
+    E203,    E203,
+
+    E501,    E501,
+
+    W503,    W503,
+
+    W504    W504
+
+
+
+select = E,W,F,Cselect = E,W,F,C
+
+show-source = Trueshow-source = True
+
+show-pep8 = Trueshow-pep8 = True
+
+count = Truecount = True
+
+statistics = Truestatistics = True
