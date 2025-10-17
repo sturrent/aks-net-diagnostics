@@ -9,14 +9,13 @@ This module handles generating and formatting diagnostic reports in multiple for
 import json
 import logging
 import os
-import stat
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
 
 class ReportGenerator:
     """Generates diagnostic reports in various formats"""
-    
+
     def __init__(
         self,
         cluster_name: str,
@@ -34,11 +33,11 @@ class ReportGenerator:
         api_probe_results: Optional[Dict[str, Any]] = None,
         failure_analysis: Optional[Dict[str, Any]] = None,
         script_version: str = "2.1",
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
     ):
         """
         Initialize the ReportGenerator
-        
+
         Args:
             cluster_name: AKS cluster name
             resource_group: Resource group name
@@ -73,11 +72,11 @@ class ReportGenerator:
         self.failure_analysis = failure_analysis or {"enabled": False}
         self.script_version = script_version
         self.logger = logger or logging.getLogger(__name__)
-    
+
     def generate_json_report(self) -> Dict[str, Any]:
         """
         Generate JSON report data
-        
+
         Returns:
             Dictionary containing complete report data
         """
@@ -85,17 +84,17 @@ class ReportGenerator:
             "metadata": {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "version": self.script_version,
-                "generatedBy": "AKS Network Diagnostics Script (Python)"
+                "generatedBy": "AKS Network Diagnostics Script (Python)",
             },
             "cluster": {
                 "name": self.cluster_name,
                 "resourceGroup": self.resource_group,
                 "subscription": self.subscription,
-                "provisioningState": self.cluster_info.get('provisioningState', ''),
-                "location": self.cluster_info.get('location', ''),
-                "nodeResourceGroup": self.cluster_info.get('nodeResourceGroup', ''),
-                "networkProfile": self.cluster_info.get('networkProfile', {}),
-                "apiServerAccess": self.cluster_info.get('apiServerAccessProfile', {})
+                "provisioningState": self.cluster_info.get("provisioningState", ""),
+                "location": self.cluster_info.get("location", ""),
+                "nodeResourceGroup": self.cluster_info.get("nodeResourceGroup", ""),
+                "networkProfile": self.cluster_info.get("networkProfile", {}),
+                "apiServerAccess": self.cluster_info.get("apiServerAccessProfile", {}),
             },
             "networking": {
                 "vnets": self.vnets_analysis,
@@ -105,60 +104,60 @@ class ReportGenerator:
                 "vmssConfiguration": self.vmss_analysis,
                 "nsgConfiguration": self.nsg_analysis,
                 "routingAnalysis": {
-                    "outboundType": self.cluster_info.get('networkProfile', {}).get('outboundType', 'loadBalancer'),
-                    "udrAnalysis": self.outbound_analysis.get("udrAnalysis")
-                }
+                    "outboundType": self.cluster_info.get("networkProfile", {}).get("outboundType", "loadBalancer"),
+                    "udrAnalysis": self.outbound_analysis.get("udrAnalysis"),
+                },
             },
             "diagnostics": {
                 "apiConnectivityProbe": self.api_probe_results,
                 "failureAnalysis": self.failure_analysis,
-                "findings": self.findings
-            }
+                "findings": self.findings,
+            },
         }
-    
+
     def save_json_report(self, filepath: str, file_permissions: int = 0o600) -> bool:
         """
         Save JSON report to file
-        
+
         Args:
             filepath: Path to save the JSON report
             file_permissions: File permissions (default: owner read/write only)
-            
+
         Returns:
             True if successful, False otherwise
         """
         try:
             report_data = self.generate_json_report()
-            
-            with open(filepath, 'w') as f:
+
+            with open(filepath, "w") as f:
                 json.dump(report_data, f, indent=2)
-            
+
             # Set secure file permissions
             os.chmod(filepath, file_permissions)
             self.logger.info(f"[DOC] JSON report saved to: {filepath}")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Failed to save JSON report: {e}")
             return False
-    
+
     def print_console_report(self, show_details: bool = False, json_report_path: Optional[str] = None):
         """
         Print console report
-        
+
         Args:
             show_details: Enable detailed output
             json_report_path: Path to JSON report if saved
         """
         print("\n" + "=" * 74)
-        
+
         if show_details:
             self._print_detailed_report()
         else:
             self._print_summary_report(json_report_path)
-        
-        print(f"\n[OK] AKS network assessment completed successfully!")
-    
+
+        print("\n[OK] AKS network assessment completed successfully!")
+
     def _print_summary_report(self, json_report_path: Optional[str] = None):
         """Print summary report"""
         print("# AKS Network Assessment Summary")
@@ -167,76 +166,78 @@ class ReportGenerator:
         print(f"**Resource Group:** {self.resource_group}")
         print(f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         print()
-        
+
         print("**Configuration:**")
-        network_profile = self.cluster_info.get('networkProfile', {})
+        network_profile = self.cluster_info.get("networkProfile", {})
         print(f"- Network Plugin: {network_profile.get('networkPlugin', 'kubenet')}")
         print(f"- Outbound Type: {network_profile.get('outboundType', 'loadBalancer')}")
-        
-        api_server_profile = self.cluster_info.get('apiServerAccessProfile')
-        is_private = api_server_profile.get('enablePrivateCluster', False) if api_server_profile else False
+
+        api_server_profile = self.cluster_info.get("apiServerAccessProfile")
+        is_private = api_server_profile.get("enablePrivateCluster", False) if api_server_profile else False
         print(f"- Private Cluster: {str(is_private).lower()}")
-        
-        if self.outbound_ips or (self.outbound_analysis and self.outbound_analysis.get('effectiveOutbound')):
+
+        if self.outbound_ips or (self.outbound_analysis and self.outbound_analysis.get("effectiveOutbound")):
             print()
             print("**Outbound Configuration:**")
-            
-            effective_outbound = self.outbound_analysis.get('effectiveOutbound', {}) if self.outbound_analysis else {}
-            
-            if effective_outbound.get('overridden_by_udr'):
+
+            effective_outbound = self.outbound_analysis.get("effectiveOutbound", {}) if self.outbound_analysis else {}
+
+            if effective_outbound.get("overridden_by_udr"):
                 # UDR overrides the load balancer
                 print("- Configured Load Balancer IPs (not effective):")
                 for ip in self.outbound_ips:
                     print(f"  - {ip}")
                 print("- Effective Outbound (via UDR):")
-                for ip in effective_outbound.get('virtual_appliance_ips', []):
+                for ip in effective_outbound.get("virtual_appliance_ips", []):
                     print(f"  - Virtual Appliance: {ip}")
             else:
                 # No UDR override, show based on configured mechanism
-                outbound_type = self.outbound_analysis.get('type', 'loadBalancer') if self.outbound_analysis else 'loadBalancer'
-                
-                if outbound_type == 'loadBalancer' and self.outbound_ips:
+                outbound_type = (
+                    self.outbound_analysis.get("type", "loadBalancer") if self.outbound_analysis else "loadBalancer"
+                )
+
+                if outbound_type == "loadBalancer" and self.outbound_ips:
                     print("- Load Balancer IPs:")
                     for ip in self.outbound_ips:
                         print(f"  - {ip}")
-                elif outbound_type == 'userDefinedRouting' and effective_outbound.get('virtual_appliance_ips'):
+                elif outbound_type == "userDefinedRouting" and effective_outbound.get("virtual_appliance_ips"):
                     print("- Virtual Appliance IPs:")
-                    for ip in effective_outbound.get('virtual_appliance_ips', []):
+                    for ip in effective_outbound.get("virtual_appliance_ips", []):
                         print(f"  - {ip}")
                 elif self.outbound_ips:
                     # Fallback to showing configured IPs
                     print("- Outbound IPs:")
                     for ip in self.outbound_ips:
                         print(f"  - {ip}")
-        
+
         print()
         print("**Findings Summary:**")
-        
-        critical_findings = [f for f in self.findings if f.get('severity') in ['critical', 'error']]
-        warning_findings = [f for f in self.findings if f.get('severity') == 'warning']
-        
+
+        critical_findings = [f for f in self.findings if f.get("severity") in ["critical", "error"]]
+        warning_findings = [f for f in self.findings if f.get("severity") == "warning"]
+
         if len(critical_findings) == 0 and len(warning_findings) == 0:
             print("- [OK] No critical issues detected")
         else:
             # Show critical/error findings
             for finding in critical_findings:
                 # For cluster operation failures, show only the error code in summary mode
-                if finding.get('code') == 'CLUSTER_OPERATION_FAILURE' and finding.get('error_code'):
+                if finding.get("code") == "CLUSTER_OPERATION_FAILURE" and finding.get("error_code"):
                     print(f"- [ERROR] Cluster failed with error: {finding.get('error_code')}")
                 else:
-                    message = finding.get('message', 'Unknown issue')
+                    message = finding.get("message", "Unknown issue")
                     print(f"- [ERROR] {message}")
-            
+
             # Show warning findings
             for finding in warning_findings:
-                message = finding.get('message', 'Unknown issue')
+                message = finding.get("message", "Unknown issue")
                 print(f"- [!] {message}")
-        
+
         print()
         if json_report_path:
             print(f"[DOC] JSON report saved to: {json_report_path}")
         print("Tip: Use --details flag for detailed analysis")
-    
+
     def _print_detailed_report(self):
         """Print detailed report"""
         print("# AKS Network Assessment Report")
@@ -246,22 +247,22 @@ class ReportGenerator:
         print(f"**Subscription:** {self.subscription}")
         print(f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         print()
-        
+
         # Cluster overview
         self._print_cluster_overview()
-        
+
         # Network configuration
         self._print_network_configuration()
-        
+
         # Connectivity test results
         self._print_connectivity_tests()
-        
+
         # NSG Analysis
         self._print_nsg_analysis()
-        
+
         # Findings
         self._print_findings()
-    
+
     def _print_cluster_overview(self):
         """Print cluster overview section"""
         print("## Cluster Overview")
@@ -269,79 +270,79 @@ class ReportGenerator:
         print("| Property | Value |")
         print("|----------|-------|")
         print(f"| Provisioning State | {self.cluster_info.get('provisioningState', '')} |")
-        
+
         # Show power state
-        power_state = self.cluster_info.get('powerState', {})
-        power_code = power_state.get('code', 'Unknown') if isinstance(power_state, dict) else str(power_state)
+        power_state = self.cluster_info.get("powerState", {})
+        power_code = power_state.get("code", "Unknown") if isinstance(power_state, dict) else str(power_state)
         print(f"| Power State | {power_code} |")
-        
+
         print(f"| Location | {self.cluster_info.get('location', '')} |")
-        
-        network_profile = self.cluster_info.get('networkProfile', {})
+
+        network_profile = self.cluster_info.get("networkProfile", {})
         print(f"| Network Plugin | {network_profile.get('networkPlugin', 'kubenet')} |")
         print(f"| Outbound Type | {network_profile.get('outboundType', 'loadBalancer')} |")
-        
-        api_server_profile = self.cluster_info.get('apiServerAccessProfile')
-        is_private = api_server_profile.get('enablePrivateCluster', False) if api_server_profile else False
+
+        api_server_profile = self.cluster_info.get("apiServerAccessProfile")
+        is_private = api_server_profile.get("enablePrivateCluster", False) if api_server_profile else False
         print(f"| Private Cluster | {str(is_private).lower()} |")
         print()
-    
+
     def _print_network_configuration(self):
         """Print network configuration section"""
         print("## Network Configuration")
         print()
-        
+
         # Service Network
-        network_profile = self.cluster_info.get('networkProfile', {})
+        network_profile = self.cluster_info.get("networkProfile", {})
         print("### Service Network")
         print(f"- **Service CIDR:** {network_profile.get('serviceCidr', '')}")
         print(f"- **DNS Service IP:** {network_profile.get('dnsServiceIp', '')}")
         print(f"- **Pod CIDR:** {network_profile.get('podCidr', '')}")
         print()
-        
+
         # API Server access
         self._print_api_server_access()
-        
+
         # Outbound connectivity
         self._print_outbound_connectivity()
-        
+
         # UDR Analysis
         self._print_udr_analysis()
-    
+
     def _print_api_server_access(self):
         """Print API server access section"""
         print("### API Server Access")
-        api_server_profile = self.cluster_info.get('apiServerAccessProfile')
-        is_private = api_server_profile.get('enablePrivateCluster', False) if api_server_profile else False
-        
+        api_server_profile = self.cluster_info.get("apiServerAccessProfile")
+        is_private = api_server_profile.get("enablePrivateCluster", False) if api_server_profile else False
+
         if is_private and api_server_profile:
             print("- **Type:** Private cluster")
-            
+
             # Try multiple sources for private FQDN
-            private_fqdn = ''
-            if api_server_profile.get('privateFqdn'):
-                private_fqdn = api_server_profile.get('privateFqdn', '')
-            elif self.cluster_info.get('privateFqdn'):
-                private_fqdn = self.cluster_info.get('privateFqdn', '')
-            
+            private_fqdn = ""
+            if api_server_profile.get("privateFqdn"):
+                private_fqdn = api_server_profile.get("privateFqdn", "")
+            elif self.cluster_info.get("privateFqdn"):
+                private_fqdn = self.cluster_info.get("privateFqdn", "")
+
             print(f"- **Private FQDN:** {private_fqdn}")
             print(f"- **Private DNS Zone:** {api_server_profile.get('privateDnsZone', '')}")
         else:
             print("- **Type:** Public cluster")
             print(f"- **Public FQDN:** {self.cluster_info.get('fqdn', '')}")
-        
+
         # Add authorized IP ranges information
         if api_server_profile:
-            authorized_ranges = api_server_profile.get('authorizedIpRanges', [])
+            authorized_ranges = api_server_profile.get("authorizedIpRanges", [])
             if authorized_ranges:
                 print(f"- **Authorized IP Ranges:** {len(authorized_ranges)} range(s)")
                 for range_cidr in authorized_ranges:
                     print(f"  - {range_cidr}")
-                
+
                 # Show access implications if we have the analysis
                 if self.api_server_access_analysis:
-                    access_restrictions = self.api_server_access_analysis.get('accessRestrictions', {})
-                    implications = access_restrictions.get('implications', [])
+                    access_restrictions = self.api_server_access_analysis.get("accessRestrictions", {})
+                    implications = access_restrictions.get("implications", [])
                     if implications:
                         print("- **Access Implications:**")
                         for implication in implications:
@@ -350,20 +351,20 @@ class ReportGenerator:
                 print("- **Access Restrictions:** None (unrestricted public access)")
                 if not is_private:
                     print("  [!] API server is accessible from any IP address on the internet")
-        
+
         print()
-    
+
     def _print_outbound_connectivity(self):
         """Print outbound connectivity section"""
         if self.outbound_ips:
-            network_profile = self.cluster_info.get('networkProfile', {})
+            network_profile = self.cluster_info.get("networkProfile", {})
             print("### Outbound Connectivity")
             print(f"- **Type:** {network_profile.get('outboundType', 'loadBalancer')}")
             print("- **Effective Public IPs:**")
             for ip in self.outbound_ips:
                 print(f"  - {ip}")
             print()
-    
+
     def _print_udr_analysis(self):
         """Print UDR analysis section"""
         udr_analysis = self.outbound_analysis.get("udrAnalysis") if self.outbound_analysis else None
@@ -372,49 +373,57 @@ class ReportGenerator:
             route_tables = udr_analysis.get("routeTables", [])
             if route_tables:
                 print(f"- **Route Tables Found:** {len(route_tables)}")
-                
+
                 for rt in route_tables:
                     print(f"- **Route Table:** {rt.get('name', 'unnamed')}")
                     print(f"  - **Resource Group:** {rt.get('resourceGroup', '')}")
-                    print(f"  - **BGP Propagation:** {'Disabled' if rt.get('disableBgpRoutePropagation') else 'Enabled'}")
+                    print(
+                        f"  - **BGP Propagation:** {'Disabled' if rt.get('disableBgpRoutePropagation') else 'Enabled'}"
+                    )
                     print(f"  - **Routes:** {len(rt.get('routes', []))}")
-                    
+
                     # Show critical routes
-                    critical_routes = [r for r in rt.get('routes', []) if r.get('impact', {}).get('severity') in ['critical', 'high']]
+                    critical_routes = [
+                        r for r in rt.get("routes", []) if r.get("impact", {}).get("severity") in ["critical", "high"]
+                    ]
                     if critical_routes:
-                        print(f"  - **Critical Routes:**")
+                        print("  - **Critical Routes:**")
                         for route in critical_routes:
-                            impact = route.get('impact', {})
-                            print(f"    - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) -> {route.get('nextHopType', '')} - {impact.get('description', '')}")
-                
+                            impact = route.get("impact", {})
+                            print(
+                                f"    - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) -> {route.get('nextHopType', '')} - {impact.get('description', '')}"
+                            )
+
                 # Show virtual appliance routes summary
                 va_routes = udr_analysis.get("virtualApplianceRoutes", [])
                 if va_routes:
                     print(f"- **Virtual Appliance Routes:** {len(va_routes)}")
                     for route in va_routes:
-                        print(f"  - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) -> {route.get('nextHopIpAddress', '')}")
-                
+                        print(
+                            f"  - {route.get('name', 'unnamed')} ({route.get('addressPrefix', '')}) -> {route.get('nextHopIpAddress', '')}"
+                        )
+
                 print()
             else:
                 print("- **No route tables found on node subnets**")
                 print()
-    
+
     def _print_connectivity_tests(self):
         """Print connectivity test results section"""
         if self.api_probe_results:
             print("### Connectivity Tests")
-            
-            if self.api_probe_results.get('skipped'):
-                reason = self.api_probe_results.get('reason', 'Unknown reason')
+
+            if self.api_probe_results.get("skipped"):
+                reason = self.api_probe_results.get("reason", "Unknown reason")
                 print(f"- **Status:** Skipped ({reason})")
                 print()
             else:
-                summary = self.api_probe_results.get('summary', {})
-                total = summary.get('total_tests', 0)
-                passed = summary.get('passed', 0)
-                failed = summary.get('failed', 0)
-                errors = summary.get('errors', 0)
-                
+                summary = self.api_probe_results.get("summary", {})
+                total = summary.get("total_tests", 0)
+                passed = summary.get("passed", 0)
+                failed = summary.get("failed", 0)
+                errors = summary.get("errors", 0)
+
                 print(f"- **Tests Executed:** {total}")
                 if passed > 0:
                     print(f"- **[OK] Passed:** {passed}")
@@ -422,139 +431,130 @@ class ReportGenerator:
                     print(f"- **X Failed:** {failed}")
                 if errors > 0:
                     print(f"- **[!] Errors:** {errors}")
-                
+
                 # Show detailed results
-                tests = self.api_probe_results.get('tests', [])
+                tests = self.api_probe_results.get("tests", [])
                 if tests:
                     print("\n**Test Details:**")
                     for test in tests:
-                        status_icon = {
-                            'passed': '[OK]',
-                            'failed': '[ERROR]', 
-                            'error': '[!]',
-                            'skipped': '[SKIP]'
-                        }.get(test.get('status'), '[?]')
-                        
-                        test_name = test.get('test_name', 'Unknown Test')
-                        vmss_name = test.get('vmss_name', 'unknown')
-                        exit_code = test.get('exit_code', -1)
+                        status_icon = {"passed": "[OK]", "failed": "[ERROR]", "error": "[!]", "skipped": "[SKIP]"}.get(
+                            test.get("status"), "[?]"
+                        )
+
+                        test_name = test.get("test_name", "Unknown Test")
+                        vmss_name = test.get("vmss_name", "unknown")
+                        exit_code = test.get("exit_code", -1)
                         print(f"- {status_icon} **{test_name}** (VMSS: {vmss_name}, Exit Code: {exit_code})")
-                        
+
                         # Show full test result in JSON format with compacted newlines
                         test_copy = test.copy()
                         # Compact stdout and stderr for single-line display
-                        if test_copy.get('stdout'):
-                            test_copy['stdout'] = test_copy['stdout'].replace('\n', '\\n')
-                        if test_copy.get('stderr'):
-                            test_copy['stderr'] = test_copy['stderr'].replace('\n', '\\n')
-                        
-                        print(f"  - **Full Test Result:**")
-                        print(f"    ```json")
+                        if test_copy.get("stdout"):
+                            test_copy["stdout"] = test_copy["stdout"].replace("\n", "\\n")
+                        if test_copy.get("stderr"):
+                            test_copy["stderr"] = test_copy["stderr"].replace("\n", "\\n")
+
+                        print("  - **Full Test Result:**")
+                        print("    ```json")
                         print(f"    {json.dumps(test_copy, indent=2)}")
-                        print(f"    ```")
+                        print("    ```")
                 print()
-    
+
     def _print_nsg_analysis(self):
         """Print NSG analysis section"""
         if self.nsg_analysis:
             print("### Network Security Group (NSG) Analysis")
-            
+
             # NSG Analysis Summary
-            subnet_nsgs = self.nsg_analysis.get('subnetNsgs', [])
-            nic_nsgs = self.nsg_analysis.get('nicNsgs', [])
+            subnet_nsgs = self.nsg_analysis.get("subnetNsgs", [])
+            nic_nsgs = self.nsg_analysis.get("nicNsgs", [])
             total_nsgs = len(subnet_nsgs) + len(nic_nsgs)
-            blocking_rules = self.nsg_analysis.get('blockingRules', [])
-            inter_node_status = self.nsg_analysis.get('interNodeCommunication', {}).get('status', 'unknown')
-            
+            blocking_rules = self.nsg_analysis.get("blockingRules", [])
+            inter_node_status = self.nsg_analysis.get("interNodeCommunication", {}).get("status", "unknown")
+
             print(f"- **NSGs Analyzed:** {total_nsgs}")
             print(f"- **Issues Found:** {len(blocking_rules)}")
-            
+
             # Inter-node communication status
-            status_icon = {
-                'ok': '[OK]',
-                'potential_issues': '[WARNING]',
-                'blocked': '[ERROR]',
-                'unknown': '[?]'
-            }.get(inter_node_status, '[?]')
+            status_icon = {"ok": "[OK]", "potential_issues": "[WARNING]", "blocked": "[ERROR]", "unknown": "[?]"}.get(
+                inter_node_status, "[?]"
+            )
             print(f"- **Inter-node Communication:** {status_icon} {inter_node_status.replace('_', ' ').title()}")
-            
+
             # Show detailed NSG information
             if total_nsgs > 0:
                 print()
                 self._print_subnet_nsgs(subnet_nsgs)
                 self._print_nic_nsgs(nic_nsgs)
                 self._print_blocking_rules(blocking_rules)
-            
+
             print()
-    
+
     def _print_subnet_nsgs(self, subnet_nsgs: List[Dict[str, Any]]):
         """Print subnet NSGs section"""
         if subnet_nsgs:
             print("**Subnet NSGs:**")
             for nsg in subnet_nsgs:
-                nsg_name = nsg.get('nsgName', 'unknown')
-                subnet_name = nsg.get('subnetName', 'unknown')
-                custom_rules = len(nsg.get('rules', []))
-                default_rules = len(nsg.get('defaultRules', []))
-                
+                nsg_name = nsg.get("nsgName", "unknown")
+                subnet_name = nsg.get("subnetName", "unknown")
+                custom_rules = len(nsg.get("rules", []))
+                default_rules = len(nsg.get("defaultRules", []))
+
                 print(f"- **{subnet_name}** -> NSG: {nsg_name}")
                 print(f"  - Custom Rules: {custom_rules}, Default Rules: {default_rules}")
-                
+
                 # Show custom rules
-                if custom_rules > 0 and nsg.get('rules'):
-                    print(f"  - **Custom Rules:**")
-                    for rule in nsg.get('rules', []):
+                if custom_rules > 0 and nsg.get("rules"):
+                    print("  - **Custom Rules:**")
+                    for rule in nsg.get("rules", []):
                         self._print_nsg_rule(rule)
-    
+
     def _print_nic_nsgs(self, nic_nsgs: List[Dict[str, Any]]):
         """Print NIC NSGs section"""
         if nic_nsgs:
             print("\n**NIC NSGs:**")
-            
+
             # Group NICs by NSG name to avoid duplicates
             nsg_groups = {}
             for nsg in nic_nsgs:
-                nsg_name = nsg.get('nsgName', 'unknown')
-                vmss_name = nsg.get('vmssName', 'unknown')
-                
+                nsg_name = nsg.get("nsgName", "unknown")
+                vmss_name = nsg.get("vmssName", "unknown")
+
                 if nsg_name not in nsg_groups:
-                    nsg_groups[nsg_name] = {
-                        'nsg_data': nsg,
-                        'vmss_list': []
-                    }
-                nsg_groups[nsg_name]['vmss_list'].append(vmss_name)
-            
+                    nsg_groups[nsg_name] = {"nsg_data": nsg, "vmss_list": []}
+                nsg_groups[nsg_name]["vmss_list"].append(vmss_name)
+
             # Display each unique NSG with its associated VMSS instances
             for nsg_name, group_data in nsg_groups.items():
-                nsg = group_data['nsg_data']
-                vmss_list = group_data['vmss_list']
-                custom_rules = len(nsg.get('rules', []))
-                default_rules = len(nsg.get('defaultRules', []))
-                
+                nsg = group_data["nsg_data"]
+                vmss_list = group_data["vmss_list"]
+                custom_rules = len(nsg.get("rules", []))
+                default_rules = len(nsg.get("defaultRules", []))
+
                 # Show NSG with all VMSS instances using it
-                vmss_names = ', '.join(vmss_list)
+                vmss_names = ", ".join(vmss_list)
                 print(f"- **{nsg_name}** (used by: {vmss_names})")
                 print(f"  - Custom Rules: {custom_rules}, Default Rules: {default_rules}")
-                
+
                 # Show custom rules if any
-                if custom_rules > 0 and nsg.get('rules'):
-                    print(f"  - **Custom Rules:**")
-                    for rule in nsg.get('rules', []):
+                if custom_rules > 0 and nsg.get("rules"):
+                    print("  - **Custom Rules:**")
+                    for rule in nsg.get("rules", []):
                         self._print_nsg_rule(rule)
-    
+
     def _print_nsg_rule(self, rule: Dict[str, Any]):
         """Print NSG rule details"""
-        access = rule.get('access', 'Unknown')
-        direction = rule.get('direction', 'Unknown')
-        priority = rule.get('priority', 'Unknown')
-        protocol = rule.get('protocol', 'Unknown')
-        dest = rule.get('destinationAddressPrefix', 'Unknown')
-        ports = rule.get('destinationPortRange', 'Unknown')
-        
-        access_icon = '[OK]' if access.lower() == 'allow' else '[X]'
+        access = rule.get("access", "Unknown")
+        direction = rule.get("direction", "Unknown")
+        priority = rule.get("priority", "Unknown")
+        protocol = rule.get("protocol", "Unknown")
+        dest = rule.get("destinationAddressPrefix", "Unknown")
+        ports = rule.get("destinationPortRange", "Unknown")
+
+        access_icon = "[OK]" if access.lower() == "allow" else "[X]"
         print(f"    - {access_icon} **{rule.get('name', 'Unknown')}** (Priority: {priority})")
         print(f"      - {direction} {protocol} to {dest} on ports {ports}")
-    
+
     def _print_blocking_rules(self, blocking_rules: List[Dict[str, Any]]):
         """Print blocking rules section"""
         if blocking_rules:
@@ -567,19 +567,19 @@ class ReportGenerator:
                 print(f"  - Destination: {rule.get('destination', 'Unknown')}")
                 print(f"  - Ports: {rule.get('ports', 'Unknown')}")
                 print(f"  - Impact: {rule.get('impact', 'Unknown')}")
-    
+
     def _print_findings(self):
         """Print findings section"""
         if self.findings:
             print("## Findings")
             print()
-            
+
             # Count findings by severity
-            critical_count = len([f for f in self.findings if f.get('severity') == 'critical'])
-            error_count = len([f for f in self.findings if f.get('severity') == 'error'])
-            warning_count = len([f for f in self.findings if f.get('severity') == 'warning'])
-            info_count = len([f for f in self.findings if f.get('severity') == 'info'])
-            
+            critical_count = len([f for f in self.findings if f.get("severity") == "critical"])
+            error_count = len([f for f in self.findings if f.get("severity") == "error"])
+            warning_count = len([f for f in self.findings if f.get("severity") == "warning"])
+            info_count = len([f for f in self.findings if f.get("severity") == "info"])
+
             # Display findings summary
             print("**Findings Summary:**")
             if critical_count > 0:
@@ -591,20 +591,17 @@ class ReportGenerator:
             if info_count > 0:
                 print(f"- [i] {info_count} Informational finding(s)")
             print()
-            
+
             # Display all findings in detail
             for finding in self.findings:
-                severity_icon = {
-                    'critical': '[X]',
-                    'error': '[X]',
-                    'warning': '[!]',
-                    'info': '[i]'
-                }.get(finding.get('severity', 'info'), '[i]')
-                
+                severity_icon = {"critical": "[X]", "error": "[X]", "warning": "[!]", "info": "[i]"}.get(
+                    finding.get("severity", "info"), "[i]"
+                )
+
                 print(f"### {severity_icon} {finding.get('code', 'UNKNOWN')}")
                 print(f"**Severity:** {finding.get('severity', 'info').upper()}")
                 print(f"**Message:** {finding.get('message', '')}")
-                if finding.get('recommendation'):
+                if finding.get("recommendation"):
                     print(f"**Recommendation:** {finding.get('recommendation', '')}")
                 print()
         else:

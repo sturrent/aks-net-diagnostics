@@ -3,12 +3,13 @@ Data models for AKS diagnostics
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class Severity(Enum):
     """Finding severity levels"""
+
     CRITICAL = "critical"
     HIGH = "high"
     WARNING = "warning"
@@ -17,6 +18,7 @@ class Severity(Enum):
 
 class FindingCode(Enum):
     """Standardized finding codes"""
+
     CLUSTER_STOPPED = "CLUSTER_STOPPED"
     CLUSTER_OPERATION_FAILURE = "CLUSTER_OPERATION_FAILURE"
     DNS_RESOLUTION_FAILED = "DNS_RESOLUTION_FAILED"
@@ -32,6 +34,7 @@ class FindingCode(Enum):
 @dataclass
 class VMSSInstance:
     """Represents a VMSS instance eligible for connectivity testing."""
+
     vmss_name: str
     resource_group: str
     instance_id: str
@@ -41,12 +44,13 @@ class VMSSInstance:
 @dataclass
 class Finding:
     """Represents a diagnostic finding"""
+
     severity: Severity
     code: FindingCode
     message: str
     recommendation: str
     details: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
@@ -54,19 +58,19 @@ class Finding:
             "code": self.code.value,
             "message": self.message,
             "recommendation": self.recommendation,
-            "details": self.details
+            "details": self.details,
         }
-    
+
     @classmethod
     def create_critical(cls, code: FindingCode, message: str, recommendation: str, **details):
         """Factory method for critical findings"""
         return cls(Severity.CRITICAL, code, message, recommendation, details)
-    
+
     @classmethod
     def create_warning(cls, code: FindingCode, message: str, recommendation: str, **details):
         """Factory method for warning findings"""
         return cls(Severity.WARNING, code, message, recommendation, details)
-    
+
     @classmethod
     def create_info(cls, code: FindingCode, message: str, recommendation: str, **details):
         """Factory method for info findings"""
@@ -76,6 +80,7 @@ class Finding:
 @dataclass
 class DiagnosticResult:
     """Container for all diagnostic results"""
+
     cluster_info: Dict[str, Any]
     agent_pools: List[Dict[str, Any]]
     vnets_analysis: List[Dict[str, Any]]
@@ -86,7 +91,7 @@ class DiagnosticResult:
     vmss_analysis: List[Dict[str, Any]]
     findings: List[Finding]
     api_probe_results: Optional[Dict[str, Any]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
@@ -99,5 +104,5 @@ class DiagnosticResult:
             "api_server_access_analysis": self.api_server_access_analysis,
             "vmss_analysis": self.vmss_analysis,
             "findings": [f.to_dict() for f in self.findings],
-            "api_probe_results": self.api_probe_results
+            "api_probe_results": self.api_probe_results,
         }

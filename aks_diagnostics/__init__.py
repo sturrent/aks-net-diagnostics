@@ -7,14 +7,14 @@ __version__ = "2.2"
 __author__ = "Azure Networking Diagnostics Generator"
 
 # Import only the modules that exist
-from .models import VMSSInstance, Finding, DiagnosticResult
+from .models import DiagnosticResult, Finding, VMSSInstance
 
 # Core will be imported when it's created
 # from .core import AKSNetworkDiagnostics
 
 __all__ = [
     # 'AKSNetworkDiagnostics',  # TODO: Uncomment when core.py is created
-    'VMSSInstance',
-    'Finding',
-    'DiagnosticResult'
+    "VMSSInstance",
+    "Finding",
+    "DiagnosticResult",
 ]

@@ -1,0 +1,45 @@
+[MASTER]
+jobs=4
+load-plugins=
+persistent=yes
+
+[MESSAGES CONTROL]
+disable=
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-few-public-methods,
+    too-many-instance-attributes,
+    too-many-arguments,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    too-many-nested-blocks,
+    too-many-return-statements,
+    duplicate-code,
+    fixme,
+    broad-exception-caught,
+    broad-exception-raised,
+    consider-using-f-string
+
+[REPORTS]
+output-format=text
+reports=no
+evaluation=10.0 - ((float(5 * error + warning + refactor + convention) / statement) * 10)
+
+[BASIC]
+good-names=i,j,k,ex,Run,_,id,ip,vm
+
+[FORMAT]
+max-line-length=120
+indent-string='    '
+indent-after-paren=4
+
+[DESIGN]
+max-args=10
+max-attributes=20
+max-branches=15
+max-locals=20
+max-returns=10
+max-statements=60
+min-public-methods=1
