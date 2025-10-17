@@ -605,8 +605,15 @@ class MisconfigurationAnalyzer:
 
             if is_overridden:
                 overriding_rule_names = [r.get("ruleName", "unknown") for r in overriding_rules[:2]]
-                message = f"NSG rule '{rule.get('ruleName')}' could block AKS traffic, but higher-priority allow rules override it: {', '.join(overriding_rule_names)}"
-                recommendation = f"Rule is currently ineffective due to higher-priority rules. Consider removing or adjusting priority {rule.get('priority')} for cleaner NSG configuration."
+                message = (
+                    f"NSG rule '{rule.get('ruleName')}' could block AKS traffic, "
+                    f"but higher-priority allow rules override it: {', '.join(overriding_rule_names)}"
+                )
+                recommendation = (
+                    f"Rule is currently ineffective due to higher-priority rules. "
+                    f"Consider removing or adjusting priority {rule.get('priority')} "
+                    f"for cleaner NSG configuration."
+                )
             else:
                 message = f"NSG rule '{rule.get('ruleName')}' in '{rule.get('nsgName')}' may block AKS traffic"
                 recommendation = f"Review NSG rule priority {rule.get('priority')} - {rule.get('impact', 'Could affect cluster functionality')}"

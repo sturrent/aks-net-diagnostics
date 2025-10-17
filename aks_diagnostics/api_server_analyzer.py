@@ -256,7 +256,7 @@ class APIServerAccessAnalyzer:
             implications.extend(
                 [
                     "[OK] API server access is restricted to specified IP ranges",
-                    "[!] API server is still exposed to the internet",
+                    "[WARNING] API server is still exposed to the internet",
                     "[NOTE] Users/services must access from authorized IP ranges",
                     "[NOTE] Node-to-API traffic must originate from authorized ranges",
                 ]
@@ -270,8 +270,8 @@ class APIServerAccessAnalyzer:
         else:  # unrestricted_public
             implications.extend(
                 [
-                    "[!] API server is publicly accessible from any IP",
-                    "[!] No network-level access restrictions",
+                    "[WARNING] API server is publicly accessible from any IP",
+                    "[WARNING] No network-level access restrictions",
                     "[NOTE] Security relies entirely on authentication and RBAC",
                     "[NOTE] Consider implementing IP restrictions for enhanced security",
                 ]

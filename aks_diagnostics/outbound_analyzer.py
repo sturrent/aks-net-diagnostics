@@ -240,9 +240,9 @@ class OutboundConnectivityAnalyzer:
             level = warning["level"]
             message = warning["message"]
             if level == "error":
-                self.logger.error("    [ERROR] %s", message)
+                self.logger.error("    %s", message)
             else:
-                self.logger.warning("    [!]  %s", message)
+                self.logger.warning("    %s", message)
 
     def _analyze_load_balancer_outbound(self, show_details: bool = False) -> None:
         """

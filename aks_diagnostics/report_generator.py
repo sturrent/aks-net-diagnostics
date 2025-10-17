@@ -232,7 +232,7 @@ class ReportGenerator:
             # Show warning findings
             for finding in warning_findings:
                 message = finding.get("message", "Unknown issue")
-                print(f"- [!] {message}")
+                print(f"- [WARNING] {message}")
 
         print()
         if json_report_path:
@@ -351,7 +351,7 @@ class ReportGenerator:
             else:
                 print("- **Access Restrictions:** None (unrestricted public access)")
                 if not is_private:
-                    print("  [!] API server is accessible from any IP address on the internet")
+                    print("  [WARNING] API server is accessible from any IP address on the internet")
 
         print()
 
@@ -429,18 +429,21 @@ class ReportGenerator:
                 if passed > 0:
                     print(f"- **[OK] Passed:** {passed}")
                 if failed > 0:
-                    print(f"- **X Failed:** {failed}")
+                    print(f"- **[ERROR] Failed:** {failed}")
                 if errors > 0:
-                    print(f"- **[!] Errors:** {errors}")
+                    print(f"- **[WARNING] Errors:** {errors}")
 
                 # Show detailed results
                 tests = self.api_probe_results.get("tests", [])
                 if tests:
                     print("\n**Test Details:**")
                     for test in tests:
-                        status_icon = {"passed": "[OK]", "failed": "[ERROR]", "error": "[!]", "skipped": "[SKIP]"}.get(
-                            test.get("status"), "[?]"
-                        )
+                        status_icon = {
+                            "passed": "[OK]",
+                            "failed": "[ERROR]",
+                            "error": "[WARNING]",
+                            "skipped": "[SKIP]",
+                        }.get(test.get("status"), "[?]")
 
                         test_name = test.get("test_name", "Unknown Test")
                         vmss_name = test.get("vmss_name", "unknown")
@@ -480,7 +483,14 @@ class ReportGenerator:
             status_icon = {"ok": "[OK]", "potential_issues": "[WARNING]", "blocked": "[ERROR]", "unknown": "[?]"}.get(
                 inter_node_status, "[?]"
             )
-            print(f"- **Inter-node Communication:** {status_icon} {inter_node_status.replace('_', ' ').title()}")
+            status_messages = {
+                "ok": "Not blocked",
+                "potential_issues": "Potential issues",
+                "blocked": "Blocked",
+                "unknown": "Unknown",
+            }
+            status_text = status_messages.get(inter_node_status, inter_node_status.replace("_", " ").title())
+            print(f"- **Inter-node Communication:** {status_icon} {status_text}")
 
             # Show detailed NSG information
             if total_nsgs > 0:
@@ -559,7 +569,7 @@ class ReportGenerator:
     def _print_blocking_rules(self, blocking_rules: List[Dict[str, Any]]):
         """Print blocking rules section"""
         if blocking_rules:
-            print("\n**[!] Potentially Blocking Rules:**")
+            print("\n**[WARNING] Potentially Blocking Rules:**")
             for rule in blocking_rules:
                 print(f"- **{rule.get('ruleName', 'Unknown')}** in NSG {rule.get('nsgName', 'Unknown')}")
                 print(f"  - Priority: {rule.get('priority', 'Unknown')}")
@@ -584,23 +594,31 @@ class ReportGenerator:
             # Display findings summary
             print("**Findings Summary:**")
             if critical_count > 0:
-                print(f"- [X] {critical_count} Critical issue(s)")
+                print(f"- [CRITICAL] {critical_count}")
             if error_count > 0:
-                print(f"- [X] {error_count} Error issue(s)")
+                print(f"- [ERROR] {error_count}")
             if warning_count > 0:
-                print(f"- [!] {warning_count} Warning issue(s)")
+                print(f"- [WARNING] {warning_count}")
             if info_count > 0:
-                print(f"- [i] {info_count} Informational finding(s)")
+                print(f"- [INFO] {info_count}")
             print()
 
+            # Define severity order (most severe first)
+            severity_order = {"critical": 0, "high": 1, "error": 1, "warning": 2, "info": 3}
+
+            # Sort findings by severity
+            sorted_findings = sorted(self.findings, key=lambda f: severity_order.get(f.get("severity", "info"), 3))
+
             # Display all findings in detail
-            for finding in self.findings:
-                severity_icon = {"critical": "[X]", "error": "[X]", "warning": "[!]", "info": "[i]"}.get(
-                    finding.get("severity", "info"), "[i]"
-                )
+            for finding in sorted_findings:
+                severity_icon = {
+                    "critical": "[CRITICAL]",
+                    "error": "[ERROR]",
+                    "warning": "[WARNING]",
+                    "info": "[INFO]",
+                }.get(finding.get("severity", "info"), "[INFO]")
 
                 print(f"### {severity_icon} {finding.get('code', 'UNKNOWN')}")
-                print(f"**Severity:** {finding.get('severity', 'info').upper()}")
                 print(f"**Message:** {finding.get('message', '')}")
                 if finding.get("recommendation"):
                     print(f"**Recommendation:** {finding.get('recommendation', '')}")
