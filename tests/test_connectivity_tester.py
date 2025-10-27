@@ -216,7 +216,7 @@ Address: 168.63.129.16
 
     def test_list_ready_vmss_instances_success(self):
         """Test listing ready VMSS instances"""
-        self.mock_azure_cli_executor.execute.side_effect = [
+        self.mock_azure_cli_executor.execute_with_permission_check.side_effect = [
             # First call: list VMSS
             [{"name": "aks-agentpool-vmss"}],
             # Second call: list instances

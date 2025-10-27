@@ -236,7 +236,9 @@ class ClusterDataCollector:
 
             # Get VMSS network profile
             vmss_detail_cmd = ["vmss", "show", "-n", vmss_name, "-g", mc_rg, "-o", "json"]
-            vmss_detail = self.azure_cli.execute(vmss_detail_cmd)
+            vmss_detail = self.azure_cli.execute_with_permission_check(
+                vmss_detail_cmd, context=f"retrieve VMSS '{vmss_name}' details"
+            )
 
             if vmss_detail:
                 network_profile = vmss_detail.get("virtualMachineProfile", {}).get("networkProfile", {})
