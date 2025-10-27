@@ -260,8 +260,9 @@ class AzureCLIExecutor:
         """
         try:
             return self.execute(cmd, expect_json=expect_json, timeout=timeout)
-        except subprocess.CalledProcessError as e:
-            stderr_output = e.stderr.strip() if e.stderr else ""
+        except AzureCLIError as e:
+            # Check if it's a permission error
+            stderr_output = getattr(e, 'stderr', str(e))
 
             if self._is_authorization_error(stderr_output):
                 # Permission error - log and track
@@ -278,5 +279,6 @@ class AzureCLIExecutor:
                 self.logger.warning(f"Insufficient permissions to {context}. Required: {action}")
 
                 return None  # Graceful degradation
+
             # Not a permission error, re-raise
             raise
