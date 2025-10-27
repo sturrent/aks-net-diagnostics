@@ -130,7 +130,7 @@ class TestNSGAnalyzer(unittest.TestCase):
             "defaultSecurityRules": [],
         }
 
-        self.azure_cli.execute.side_effect = [subnet_response, nsg_response]
+        self.azure_cli.execute_with_permission_check.side_effect = [subnet_response, nsg_response]
 
         analyzer._analyze_subnet_nsgs()
 
@@ -195,7 +195,7 @@ class TestNSGAnalyzer(unittest.TestCase):
             "defaultSecurityRules": [],
         }
 
-        self.azure_cli.execute.return_value = nsg_response
+        self.azure_cli.execute_with_permission_check.return_value = nsg_response
 
         analyzer._analyze_nic_nsgs()
 

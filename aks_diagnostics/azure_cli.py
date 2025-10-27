@@ -278,6 +278,5 @@ class AzureCLIExecutor:
                 self.logger.warning(f"Insufficient permissions to {context}. Required: {action}")
 
                 return None  # Graceful degradation
-            
             # Not a permission error, re-raise
             raise

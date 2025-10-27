@@ -169,12 +169,12 @@ class NSGAnalyzer(BaseAnalyzer):
                     # Get subnet information with permission handling
                     try:
                         subnet_info = self.azure_cli.execute_with_permission_check(
-                            ["network", "vnet", "subnet", "show", "--ids", subnet_id], f"retrieve subnet details"
+                            ["network", "vnet", "subnet", "show", "--ids", subnet_id], "retrieve subnet details"
                         )
 
                         if subnet_info is None:
                             # Permission denied - skip
-                            self.logger.debug(f"Skipping subnet due to insufficient permissions")
+                            self.logger.debug("Skipping subnet due to insufficient permissions")
                             continue
 
                         if not subnet_info or not isinstance(subnet_info, dict):

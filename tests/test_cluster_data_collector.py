@@ -123,18 +123,18 @@ class TestClusterDataCollector(unittest.TestCase):
             }
         ]
 
-        self.mock_azure_cli.execute.side_effect = [mock_vnet, mock_peerings]
+        self.mock_azure_cli.execute_with_permission_check.side_effect = [mock_vnet, mock_peerings]
 
         result = self.collector.collect_vnet_info(agent_pools)
 
         # Verify VNet show command was called
-        vnet_cmd_call = self.mock_azure_cli.execute.call_args_list[0]
+        vnet_cmd_call = self.mock_azure_cli.execute_with_permission_check.call_args_list[0]
         self.assertEqual(
             vnet_cmd_call[0][0], ["network", "vnet", "show", "-n", "test-vnet", "-g", "vnet-rg", "-o", "json"]
         )
 
         # Verify peering command was called
-        peering_cmd_call = self.mock_azure_cli.execute.call_args_list[1]
+        peering_cmd_call = self.mock_azure_cli.execute_with_permission_check.call_args_list[1]
         self.assertEqual(
             peering_cmd_call[0][0],
             ["network", "vnet", "peering", "list", "-g", "vnet-rg", "--vnet-name", "test-vnet", "-o", "json"],
@@ -234,16 +234,17 @@ class TestClusterDataCollector(unittest.TestCase):
             },
         }
 
-        self.mock_azure_cli.execute.side_effect = [mock_vmss_list, mock_vmss_detail_1, mock_vmss_detail_2]
+        self.mock_azure_cli.execute_with_permission_check.side_effect = [mock_vmss_list]
+        self.mock_azure_cli.execute.side_effect = [mock_vmss_detail_1, mock_vmss_detail_2]
 
         result = self.collector.collect_vmss_info(cluster_info)
 
         # Verify VMSS list command
-        list_cmd_call = self.mock_azure_cli.execute.call_args_list[0]
+        list_cmd_call = self.mock_azure_cli.execute_with_permission_check.call_args_list[0]
         self.assertEqual(list_cmd_call[0][0], ["vmss", "list", "-g", "MC_test-rg_test-cluster_eastus", "-o", "json"])
 
         # Verify VMSS details commands
-        self.assertEqual(self.mock_azure_cli.execute.call_count, 3)
+        self.assertEqual(self.mock_azure_cli.execute.call_count, 2)
 
         # Verify result
         self.assertEqual(len(result), 2)
@@ -291,13 +292,17 @@ class TestClusterDataCollector(unittest.TestCase):
             "virtualMachineProfile": {"networkProfile": {"networkInterfaceConfigurations": []}},
         }
 
+        # Mock execute for cluster_info calls (still use .execute)
+        # Mock execute_with_permission_check for VNet and VMSS calls
         self.mock_azure_cli.execute.side_effect = [
             mock_cluster,  # collect_cluster_info: cluster
             mock_agent_pools,  # collect_cluster_info: agent pools
+            mock_vmss_detail,  # collect_vmss_info: vmss detail
+        ]
+        self.mock_azure_cli.execute_with_permission_check.side_effect = [
             mock_vnet,  # collect_vnet_info: vnet show
             [],  # collect_vnet_info: peerings
             mock_vmss_list,  # collect_vmss_info: vmss list
-            mock_vmss_detail,  # collect_vmss_info: vmss detail
         ]
 
         result = self.collector.collect_all("test-cluster", "test-rg")

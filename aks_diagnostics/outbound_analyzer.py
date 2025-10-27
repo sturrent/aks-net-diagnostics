@@ -356,9 +356,7 @@ class OutboundConnectivityAnalyzer:
                         if public_ip and public_ip.get("id"):
                             # Get public IP details
                             ip_cmd = ["network", "public-ip", "show", "--ids", public_ip["id"], "-o", "json"]
-                            ip_info = self.azure_cli.execute_with_permission_check(
-                                ip_cmd, f"retrieve public IP details"
-                            )
+                            ip_info = self.azure_cli.execute_with_permission_check(ip_cmd, "retrieve public IP details")
 
                             if ip_info is None:
                                 # Permission denied - skip
@@ -412,7 +410,7 @@ class OutboundConnectivityAnalyzer:
 
         if nat_gateways is None:
             # Permission denied - log and return
-            self.logger.debug(f"Skipping NAT Gateway analysis due to insufficient permissions")
+            self.logger.debug("Skipping NAT Gateway analysis due to insufficient permissions")
             return
 
         if not isinstance(nat_gateways, list):
