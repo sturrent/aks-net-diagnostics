@@ -213,25 +213,38 @@ class ReportGenerator:
         print()
         print("**Findings Summary:**")
 
-        critical_findings = [f for f in self.findings if f.get("severity") in ["critical", "error"]]
+        critical_findings = [f for f in self.findings if f.get("severity") == "critical"]
+        high_findings = [f for f in self.findings if f.get("severity") == "high"]
         warning_findings = [f for f in self.findings if f.get("severity") == "warning"]
+        info_findings = [f for f in self.findings if f.get("severity") == "info"]
 
-        if len(critical_findings) == 0 and len(warning_findings) == 0:
-            print("- [OK] No critical issues detected")
+        if (
+            len(critical_findings) == 0
+            and len(high_findings) == 0
+            and len(warning_findings) == 0
+            and len(info_findings) == 0
+        ):
+            print("- [OK] No issues detected")
         else:
-            # Show critical/error findings
+            # Show critical findings
             for finding in critical_findings:
-                # For cluster operation failures, show only the error code in summary mode
-                if finding.get("code") == "CLUSTER_OPERATION_FAILURE" and finding.get("error_code"):
-                    print(f"- [ERROR] Cluster failed with error: {finding.get('error_code')}")
-                else:
-                    message = finding.get("message", "Unknown issue")
-                    print(f"- [ERROR] {message}")
+                message = finding.get("message", "Unknown issue")
+                print(f"- [CRITICAL] {message}")
+
+            # Show high severity findings
+            for finding in high_findings:
+                message = finding.get("message", "Unknown issue")
+                print(f"- [HIGH] {message}")
 
             # Show warning findings
             for finding in warning_findings:
                 message = finding.get("message", "Unknown issue")
                 print(f"- [WARNING] {message}")
+
+            # Show info findings (if any)
+            for finding in info_findings:
+                message = finding.get("message", "Unknown issue")
+                print(f"- [INFO] {message}")
 
         print()
         if json_report_path:
@@ -586,7 +599,7 @@ class ReportGenerator:
 
             # Count findings by severity
             critical_count = len([f for f in self.findings if f.get("severity") == "critical"])
-            error_count = len([f for f in self.findings if f.get("severity") == "error"])
+            high_count = len([f for f in self.findings if f.get("severity") == "high"])
             warning_count = len([f for f in self.findings if f.get("severity") == "warning"])
             info_count = len([f for f in self.findings if f.get("severity") == "info"])
 
@@ -594,8 +607,8 @@ class ReportGenerator:
             print("**Findings Summary:**")
             if critical_count > 0:
                 print(f"- [CRITICAL] {critical_count}")
-            if error_count > 0:
-                print(f"- [ERROR] {error_count}")
+            if high_count > 0:
+                print(f"- [HIGH] {high_count}")
             if warning_count > 0:
                 print(f"- [WARNING] {warning_count}")
             if info_count > 0:
@@ -603,7 +616,7 @@ class ReportGenerator:
             print()
 
             # Define severity order (most severe first)
-            severity_order = {"critical": 0, "high": 1, "error": 1, "warning": 2, "info": 3}
+            severity_order = {"critical": 0, "high": 1, "warning": 2, "info": 3}
 
             # Sort findings by severity (most severe first)
             sorted_findings = sorted(self.findings, key=lambda f: severity_order.get(f.get("severity", "info"), 3))
@@ -612,7 +625,7 @@ class ReportGenerator:
             for finding in sorted_findings:
                 severity_icon = {
                     "critical": "[CRITICAL]",
-                    "error": "[ERROR]",
+                    "high": "[HIGH]",
                     "warning": "[WARNING]",
                     "info": "[INFO]",
                 }.get(finding.get("severity", "info"), "[INFO]")

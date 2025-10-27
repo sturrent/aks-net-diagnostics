@@ -210,11 +210,13 @@ class MisconfigurationAnalyzer:
         private_dns_zone = api_server_profile.get("privateDnsZone", "")
 
         if private_dns_zone == "system":
-            self._check_system_private_dns_issues(findings)
+            self._check_system_private_dns_issues(cluster_info, findings)
         elif private_dns_zone and private_dns_zone != "system":
             self._check_private_dns_vnet_links(cluster_info, private_dns_zone, findings)
 
-    def _check_system_private_dns_issues(self, findings: List[Dict[str, Any]]) -> None:
+    def _check_system_private_dns_issues(
+        self, cluster_info: Dict[str, Any], findings: List[Dict[str, Any]]
+    ) -> None:
         """Check system-managed private DNS zone issues"""
         try:
             cmd = ["network", "private-dns", "zone", "list", "-o", "json"]
@@ -235,12 +237,14 @@ class MisconfigurationAnalyzer:
                 zone_rg = zone.get("resourceGroup", "")
 
                 if zone_rg and zone_name:
-                    self._check_dns_server_vnet_links(zone_rg, zone_name, findings)
+                    self._check_dns_server_vnet_links(cluster_info, zone_rg, zone_name, findings)
 
         except Exception as e:
             self.logger.info(f"Could not analyze system private DNS issues: {e}")
 
-    def _check_dns_server_vnet_links(self, zone_rg: str, zone_name: str, findings: List[Dict[str, Any]]) -> None:
+    def _check_dns_server_vnet_links(
+        self, cluster_info: Dict[str, Any], zone_rg: str, zone_name: str, findings: List[Dict[str, Any]]
+    ) -> None:
         """Check if VNets with custom DNS servers are properly linked to private DNS zone"""
         try:
             cmd = ["network", "private-dns", "link", "vnet", "list", "-g", zone_rg, "-z", zone_name, "-o", "json"]
@@ -260,7 +264,15 @@ class MisconfigurationAnalyzer:
 
                 if dns_servers:
                     for dns_server in dns_servers:
-                        dns_host_vnet = self._find_dns_server_host_vnet(dns_server)
+                        self.logger.debug(f"Looking up VNet for DNS server: {dns_server}")
+                        dns_host_vnet = self._find_dns_server_host_vnet(dns_server, cluster_info)
+
+                        if dns_host_vnet:
+                            self.logger.debug(
+                                f"Found DNS server {dns_server} in VNet: {dns_host_vnet.get('name', 'unknown')}"
+                            )
+                        else:
+                            self.logger.debug(f"Could not find VNet for DNS server: {dns_server}")
 
                         if dns_host_vnet and dns_host_vnet.get("id") not in linked_vnet_ids:
                             dns_host_vnet_name = dns_host_vnet.get("name", "unknown")
@@ -286,30 +298,102 @@ class MisconfigurationAnalyzer:
 
         return vnets
 
-    def _find_dns_server_host_vnet(self, dns_server_ip: str) -> Optional[Dict[str, str]]:
-        """Find which VNet hosts the given DNS server IP"""
+    def _find_dns_server_host_vnet(
+        self, dns_server_ip: str, cluster_info: Dict[str, Any]
+    ) -> Optional[Dict[str, str]]:
+        """
+        Find which VNet hosts the given DNS server IP by checking only peered VNets.
+        Returns the most specific match (highest prefix length) to avoid matching overly broad VNets.
+        """
         try:
-            cmd = ["network", "vnet", "list", "-o", "json"]
-            vnets = self.azure_cli.execute(cmd)
-
-            if not isinstance(vnets, list):
+            # Get cluster VNet IDs
+            cluster_vnet_ids = self._get_cluster_vnet_ids(cluster_info)
+            if not cluster_vnet_ids:
+                self.logger.debug("No cluster VNet IDs found")
                 return None
 
             dns_ip = ipaddress.ip_address(dns_server_ip)
+            best_match = None
+            smallest_prefix_len = -1
 
-            for vnet in vnets:
-                address_prefixes = vnet.get("addressSpace", {}).get("addressPrefixes", [])
-                for prefix in address_prefixes:
-                    try:
-                        network = ipaddress.ip_network(prefix, strict=False)
-                        if dns_ip in network:
-                            return {
-                                "id": vnet.get("id", ""),
-                                "name": vnet.get("name", ""),
-                                "resourceGroup": vnet.get("resourceGroup", ""),
-                            }
-                    except Exception:
+            # Check each cluster VNet and its peerings
+            for vnet_id in cluster_vnet_ids:
+                # Parse VNet resource ID: /subscriptions/{sub}/resourceGroups/{rg}/.../virtualNetworks/{name}
+                parts = vnet_id.split("/")
+                if len(parts) < 9:
+                    continue
+
+                vnet_rg = parts[4]
+                vnet_name = parts[8]
+
+                # Get VNet details including peerings
+                cmd = ["network", "vnet", "show", "-g", vnet_rg, "-n", vnet_name, "-o", "json"]
+                vnet_data = self.azure_cli.execute(cmd)
+
+                if not isinstance(vnet_data, dict):
+                    continue
+
+                # Get peerings
+                peerings = vnet_data.get("virtualNetworkPeerings", [])
+
+                # Check peered VNets
+                for peering in peerings:
+                    remote_vnet_id = peering.get("remoteVirtualNetwork", {}).get("id", "")
+                    if not remote_vnet_id:
                         continue
+
+                    # Parse remote VNet resource ID
+                    remote_parts = remote_vnet_id.split("/")
+                    if len(remote_parts) < 9:
+                        continue
+
+                    remote_vnet_rg = remote_parts[4]
+                    remote_vnet_name = remote_parts[8]
+
+                    # Get remote VNet details
+                    remote_cmd = [
+                        "network",
+                        "vnet",
+                        "show",
+                        "-g",
+                        remote_vnet_rg,
+                        "-n",
+                        remote_vnet_name,
+                        "-o",
+                        "json",
+                    ]
+                    remote_vnet_data = self.azure_cli.execute(remote_cmd)
+
+                    if not isinstance(remote_vnet_data, dict):
+                        continue
+
+                    # Check if DNS IP is in this VNet's address space
+                    address_prefixes = remote_vnet_data.get("addressSpace", {}).get("addressPrefixes", [])
+                    for prefix in address_prefixes:
+                        try:
+                            network = ipaddress.ip_network(prefix, strict=False)
+                            if dns_ip in network:
+                                self.logger.debug(
+                                    f"DNS IP {dns_ip} found in VNet '{remote_vnet_data.get('name', '')}' "
+                                    f"(prefix: {prefix}, prefix_len: {network.prefixlen})"
+                                )
+                                # Use most specific match (highest prefix length)
+                                if network.prefixlen > smallest_prefix_len:
+                                    smallest_prefix_len = network.prefixlen
+                                    best_match = {
+                                        "id": remote_vnet_data.get("id", ""),
+                                        "name": remote_vnet_data.get("name", ""),
+                                        "resourceGroup": remote_vnet_data.get("resourceGroup", ""),
+                                    }
+                                    self.logger.debug(
+                                        f"Updated best match to VNet '{best_match['name']}' "
+                                        f"(more specific prefix: /{network.prefixlen})"
+                                    )
+                        except Exception as e:
+                            self.logger.debug(f"Error parsing network prefix {prefix}: {e}")
+                            continue
+
+            return best_match
 
         except Exception as e:
             self.logger.info(f"Could not find DNS server host VNet: {e}")

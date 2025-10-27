@@ -177,19 +177,20 @@ class DNSAnalyzer:
             non_azure_dns = [dns for dns in dns_servers if dns != azure_dns]
 
             if non_azure_dns and is_private_cluster:
-                # Private cluster with custom DNS - high risk
+                # Private cluster with custom DNS - potential issue but can work if configured properly
                 from .models import FindingCode
 
                 self.findings.append(
-                    Finding.create_critical(
+                    Finding.create_warning(
                         code=FindingCode.PRIVATE_DNS_MISCONFIGURED,
-                        message=f"Private cluster is using custom DNS servers ({', '.join(non_azure_dns)}) that cannot resolve Azure private DNS zones",
+                        message=f"Private cluster is using custom DNS servers ({', '.join(non_azure_dns)}) which may not resolve Azure private DNS zones",
                         recommendation=(
-                            "For private clusters, ensure custom DNS servers forward Azure private DNS zone queries to Azure DNS (168.63.129.16). "
+                            "For private clusters, custom DNS servers must be configured to resolve Azure private DNS zones. "
                             f"Current DNS servers: {', '.join(dns_servers)}. "
-                            "Either: (1) Configure DNS forwarding to 168.63.129.16 for '*.privatelink.*.azmk8s.io', "
-                            "(2) Use Azure DNS as primary DNS server, or "
-                            "(3) Configure conditional forwarding in your custom DNS solution."
+                            "Ensure one of the following: "
+                            "(1) DNS server VNet is linked to the private DNS zone, OR "
+                            "(2) Configure DNS forwarding to Azure DNS (168.63.129.16) for '*.privatelink.*.azmk8s.io', OR "
+                            "(3) Use Azure DNS (168.63.129.16) as primary DNS server."
                         ),
                         vnetName=vnet_name,
                         vnetResourceGroup=vnet_rg,
