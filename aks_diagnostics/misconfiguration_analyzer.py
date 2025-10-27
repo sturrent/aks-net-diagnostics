@@ -790,6 +790,19 @@ class MisconfigurationAnalyzer:
         if not api_probe_results:
             return
 
+        # Check if probe tests were skipped due to permission issues
+        if api_probe_results.get("skipped") and api_probe_results.get("reason") == "permission_denied":
+            permission_error = api_probe_results.get("permission_error", "Unknown")
+            findings.append(
+                {
+                    "severity": "warning",
+                    "code": "PERMISSION_INSUFFICIENT_PROBE_TEST",
+                    "message": "Unable to run connectivity probe tests due to insufficient permissions",
+                    "recommendation": f"Grant required permission to run connectivity tests from VMSS instances: {permission_error}",
+                }
+            )
+            return
+
         if not api_probe_results.get("enabled"):
             return
 

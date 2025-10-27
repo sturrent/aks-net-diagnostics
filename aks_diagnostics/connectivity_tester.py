@@ -101,6 +101,11 @@ class ConnectivityTester:
 
         # Get VMSS instances for testing (limited to first available for performance)
         vmss_instances = self._list_ready_vmss_instances()
+
+        # Check if permission error was set during VMSS listing
+        if self.probe_results.get("skipped") and self.probe_results.get("reason") == "permission_denied":
+            return self.probe_results
+
         if not vmss_instances:
             self.logger.info("No VMSS instances found for connectivity testing")
             return self.probe_results
@@ -141,11 +146,25 @@ class ConnectivityTester:
             self.logger.info(f"Error listing VMSS in {mc_rg}: {exc}")
             return instances
 
-        if not vmss_list or not isinstance(vmss_list, list):
+        # Check for permission error (None) vs empty list (no VMSS)
+        if vmss_list is None:
             self.logger.warning(
                 f"Unable to list VMSS instances for connectivity testing. "
                 f"Skipping active probes. Required permission: Microsoft.Compute/virtualMachineScaleSets/read"
             )
+            # Set probe results to indicate permission issue
+            self.probe_results = {
+                "enabled": False,
+                "skipped": True,
+                "reason": "permission_denied",
+                "permission_error": "Microsoft.Compute/virtualMachineScaleSets/read",
+                "tests": [],
+                "summary": {"total_tests": 0, "passed": 0, "failed": 0, "errors": 0},
+            }
+            return instances
+
+        if not isinstance(vmss_list, list):
+            self.logger.warning(f"Unexpected response type from VMSS list: {type(vmss_list)}")
             return instances
 
         for vmss in vmss_list:
