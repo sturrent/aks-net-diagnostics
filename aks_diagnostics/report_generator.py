@@ -393,13 +393,27 @@ class ReportGenerator:
 
     def _print_outbound_connectivity(self):
         """Print outbound connectivity section"""
+        network_profile = self.cluster_info.get("networkProfile", {})
+        outbound_type = network_profile.get("outboundType", "loadBalancer")
+        
+        # Check if we have permission issues
+        has_lb_permission_issue = any(
+            f.get("code") == "PERMISSION_INSUFFICIENT_LB" for f in self.findings
+        )
+        
         if self.outbound_ips:
-            network_profile = self.cluster_info.get("networkProfile", {})
             print("### Outbound Connectivity")
-            print(f"- **Type:** {network_profile.get('outboundType', 'loadBalancer')}")
+            print(f"- **Type:** {outbound_type}")
             print("- **Effective Public IPs:**")
             for ip in self.outbound_ips:
                 print(f"  - {ip}")
+            print()
+        elif has_lb_permission_issue and outbound_type in ["loadBalancer", "managedNATGateway"]:
+            # Show permission issue message
+            print("### Outbound Connectivity")
+            print(f"- **Type:** {outbound_type}")
+            print(f"- **Status:** Unable to retrieve {outbound_type} configuration due to insufficient permissions")
+            print("- **Action:** See permission findings below for details")
             print()
 
     def _print_udr_analysis(self):
