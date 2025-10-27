@@ -81,11 +81,16 @@ class AzureCLIExecutor:
             stderr_output = e.stderr.strip() if e.stderr else ""
             stdout_output = e.stdout.strip() if e.stdout else ""
 
-            self.logger.error(f"Azure CLI command failed: {cmd_str}")
-            if stderr_output:
-                self.logger.error(f"Error: {stderr_output}")
-            elif stdout_output:
-                self.logger.error(f"Output: {stdout_output}")
+            # Check if this is a permission error - don't log it as ERROR since it will be handled gracefully
+            is_permission_error = self._is_authorization_error(stderr_output)
+
+            if not is_permission_error:
+                # Only log as ERROR if it's not a permission issue
+                self.logger.error(f"Azure CLI command failed: {cmd_str}")
+                if stderr_output:
+                    self.logger.error(f"Error: {stderr_output}")
+                elif stdout_output:
+                    self.logger.error(f"Output: {stdout_output}")
 
             # Check for authentication errors
             if "az login" in stderr_output.lower() or "authentication" in stderr_output.lower():
