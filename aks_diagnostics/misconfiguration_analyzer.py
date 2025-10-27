@@ -22,6 +22,7 @@ class MisconfigurationAnalyzer:
         self.azure_cli = azure_cli_executor
         self.logger = logger or logging.getLogger(__name__)
         self._cluster_stopped = False
+        self.findings = []  # Store permission-related findings
 
     def analyze(
         self,
@@ -218,7 +219,26 @@ class MisconfigurationAnalyzer:
         """Check system-managed private DNS zone issues"""
         try:
             cmd = ["network", "private-dns", "zone", "list", "-o", "json"]
-            zones = self.azure_cli.execute(cmd)
+            zones = self.azure_cli.execute_with_permission_check(cmd, "list private DNS zones")
+
+            if zones is None:
+                # Permission denied
+                from .models import Finding, FindingCode
+
+                finding = Finding.create_warning(
+                    code=FindingCode.PERMISSION_INSUFFICIENT_DNS,
+                    message="Insufficient permissions to list private DNS zones",
+                    recommendation=(
+                        "Grant the following permission to analyze private DNS configuration:\n"
+                        "  Microsoft.Network/privateDnsZones/read\n\n"
+                        "Example Azure CLI command:\n"
+                        "  az role assignment create --assignee <user-principal-id> \\\n"
+                        "    --role 'DNS Zone Contributor' \\\n"
+                        "    --scope '/subscriptions/<sub-id>'"
+                    ),
+                )
+                self.findings.append(finding)
+                return
 
             aks_private_zones = []
             if isinstance(zones, list):
@@ -246,7 +266,14 @@ class MisconfigurationAnalyzer:
         """Check if VNets with custom DNS servers are properly linked to private DNS zone"""
         try:
             cmd = ["network", "private-dns", "link", "vnet", "list", "-g", zone_rg, "-z", zone_name, "-o", "json"]
-            links = self.azure_cli.execute(cmd)
+            links = self.azure_cli.execute_with_permission_check(
+                cmd, f"list VNet links for private DNS zone '{zone_name}'"
+            )
+
+            if links is None:
+                # Permission denied - already logged, just return
+                self.logger.debug(f"Skipping VNet links check for '{zone_name}' due to insufficient permissions")
+                return
 
             if not isinstance(links, list):
                 return
@@ -319,9 +346,14 @@ class MisconfigurationAnalyzer:
 
                 vnet_ids_seen.add(vnet_id)
 
-                # Get VNet details including DNS servers
+                # Get VNet details including DNS servers with permission handling
                 cmd = ["network", "vnet", "show", "-g", vnet_rg, "-n", vnet_name, "-o", "json"]
-                vnet_data = self.azure_cli.execute(cmd)
+                vnet_data = self.azure_cli.execute_with_permission_check(cmd, f"retrieve VNet '{vnet_name}' details")
+
+                if vnet_data is None:
+                    # Permission denied - skip this VNet
+                    self.logger.debug(f"Skipping VNet '{vnet_name}' due to insufficient permissions")
+                    continue
 
                 if not isinstance(vnet_data, dict):
                     continue
@@ -368,9 +400,18 @@ class MisconfigurationAnalyzer:
                 vnet_rg = parts[4]
                 vnet_name = parts[8]
 
-                # Get VNet details including peerings
+                # Get VNet details including peerings with permission handling
                 cmd = ["network", "vnet", "show", "-g", vnet_rg, "-n", vnet_name, "-o", "json"]
-                vnet_data = self.azure_cli.execute(cmd)
+                vnet_data = self.azure_cli.execute_with_permission_check(
+                    cmd, f"retrieve VNet '{vnet_name}' for DNS server lookup"
+                )
+
+                if vnet_data is None:
+                    # Permission denied - skip this VNet
+                    self.logger.debug(
+                        f"Skipping VNet '{vnet_name}' for DNS server lookup due to insufficient permissions"
+                    )
+                    continue
 
                 if not isinstance(vnet_data, dict):
                     continue
@@ -392,7 +433,7 @@ class MisconfigurationAnalyzer:
                     remote_vnet_rg = remote_parts[4]
                     remote_vnet_name = remote_parts[8]
 
-                    # Get remote VNet details
+                    # Get remote VNet details with permission handling
                     remote_cmd = [
                         "network",
                         "vnet",
@@ -404,7 +445,14 @@ class MisconfigurationAnalyzer:
                         "-o",
                         "json",
                     ]
-                    remote_vnet_data = self.azure_cli.execute(remote_cmd)
+                    remote_vnet_data = self.azure_cli.execute_with_permission_check(
+                        remote_cmd, f"retrieve peered VNet '{remote_vnet_name}' details"
+                    )
+
+                    if remote_vnet_data is None:
+                        # Permission denied - skip this peered VNet
+                        self.logger.debug(f"Skipping peered VNet '{remote_vnet_name}' due to insufficient permissions")
+                        continue
 
                     if not isinstance(remote_vnet_data, dict):
                         continue
@@ -469,9 +517,14 @@ class MisconfigurationAnalyzer:
                     "-o",
                     "json",
                 ]
-                links = self.azure_cli.execute(cmd)
+                links = self.azure_cli.execute_with_permission_check(
+                    cmd, f"list VNet links for private DNS zone '{dns_zone_name}'"
+                )
 
-                if isinstance(links, list):
+                if links is None:
+                    # Permission denied - skip
+                    self.logger.debug(f"Skipping VNet links for '{dns_zone_name}' due to insufficient permissions")
+                elif isinstance(links, list):
                     cluster_vnet_ids = self._get_cluster_vnet_ids(cluster_info)
                     linked_vnet_ids = [link.get("virtualNetwork", {}).get("id", "") for link in links]
 
@@ -493,7 +546,12 @@ class MisconfigurationAnalyzer:
         """Find the resource group containing the private DNS zone"""
         try:
             cmd = ["network", "private-dns", "zone", "list", "-o", "json"]
-            zones = self.azure_cli.execute(cmd)
+            zones = self.azure_cli.execute_with_permission_check(cmd, "list private DNS zones for zone lookup")
+
+            if zones is None:
+                # Permission denied - return empty string
+                return ""
+
             if isinstance(zones, list):
                 for zone in zones:
                     if zone.get("name") == zone_name:

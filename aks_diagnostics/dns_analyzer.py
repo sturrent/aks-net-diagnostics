@@ -145,10 +145,16 @@ class DNSAnalyzer:
             vnet_rg = vnet_parts[4]
             vnet_name = vnet_parts[8]
 
-            # Get VNet details including DNS servers
-            vnet_info = self.azure_cli.execute(
-                ["network", "vnet", "show", "--name", vnet_name, "--resource-group", vnet_rg]
+            # Get VNet details including DNS servers with permission handling
+            vnet_info = self.azure_cli.execute_with_permission_check(
+                ["network", "vnet", "show", "--name", vnet_name, "--resource-group", vnet_rg],
+                f"retrieve VNet '{vnet_name}' DNS configuration",
             )
+
+            if vnet_info is None:
+                # Permission denied
+                self.logger.warning(f"  Insufficient permissions to retrieve VNet DNS configuration for {vnet_name}")
+                return
 
             if not vnet_info:
                 self.logger.warning(f"  Unable to retrieve VNet information for {vnet_name}")

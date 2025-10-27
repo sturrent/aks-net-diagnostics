@@ -26,6 +26,7 @@ class NSGAnalyzer(BaseAnalyzer):
         """
         super().__init__(azure_cli, cluster_info)
         self.vmss_info = vmss_info
+        self.findings = []  # Store permission-related findings
         self.nsg_analysis = {
             "subnetNsgs": [],
             "nicNsgs": [],
@@ -165,9 +166,16 @@ class NSGAnalyzer(BaseAnalyzer):
 
                     processed_subnets.add(subnet_id)
 
-                    # Get subnet information
+                    # Get subnet information with permission handling
                     try:
-                        subnet_info = self.azure_cli.execute(["network", "vnet", "subnet", "show", "--ids", subnet_id])
+                        subnet_info = self.azure_cli.execute_with_permission_check(
+                            ["network", "vnet", "subnet", "show", "--ids", subnet_id], f"retrieve subnet details"
+                        )
+
+                        if subnet_info is None:
+                            # Permission denied - skip
+                            self.logger.debug(f"Skipping subnet due to insufficient permissions")
+                            continue
 
                         if not subnet_info or not isinstance(subnet_info, dict):
                             continue
@@ -177,8 +185,29 @@ class NSGAnalyzer(BaseAnalyzer):
                             nsg_id = nsg_info.get("id")
                             nsg_name = nsg_id.split("/")[-1] if nsg_id else "unknown"
 
-                            # Get NSG details
-                            nsg_details = self.azure_cli.execute(["network", "nsg", "show", "--ids", nsg_id])
+                            # Get NSG details with permission handling
+                            nsg_details = self.azure_cli.execute_with_permission_check(
+                                ["network", "nsg", "show", "--ids", nsg_id], f"retrieve NSG '{nsg_name}'"
+                            )
+
+                            if nsg_details is None:
+                                # Permission denied
+                                from .models import Finding, FindingCode
+
+                                finding = Finding.create_warning(
+                                    code=FindingCode.PERMISSION_INSUFFICIENT_NSG,
+                                    message=f"Insufficient permissions to retrieve NSG '{nsg_name}' details",
+                                    recommendation=(
+                                        f"Grant the following permission to analyze NSG configuration:\n"
+                                        f"  Microsoft.Network/networkSecurityGroups/read\n\n"
+                                        f"Example Azure CLI command:\n"
+                                        f"  az role assignment create --assignee <user-principal-id> \\\n"
+                                        f"    --role 'Network Contributor' \\\n"
+                                        f"    --scope '{nsg_id}'"
+                                    ),
+                                )
+                                self.findings.append(finding)
+                                continue
 
                             if nsg_details and isinstance(nsg_details, dict):
                                 self.nsg_analysis["subnetNsgs"].append(
@@ -218,7 +247,14 @@ class NSGAnalyzer(BaseAnalyzer):
 
                     try:
                         # Get NSG details
-                        nsg_details = self.azure_cli.execute(["network", "nsg", "show", "--ids", nsg_id])
+                        nsg_details = self.azure_cli.execute_with_permission_check(
+                            ["network", "nsg", "show", "--ids", nsg_id], f"retrieve NIC NSG '{nsg_name}'"
+                        )
+
+                        if nsg_details is None:
+                            # Permission denied - skip
+                            self.logger.debug(f"Skipping NIC NSG '{nsg_name}' due to insufficient permissions")
+                            continue
 
                         if nsg_details and isinstance(nsg_details, dict):
                             self.nsg_analysis["nicNsgs"].append(
