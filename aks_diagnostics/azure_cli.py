@@ -24,6 +24,7 @@ class AzureCLIExecutor:
     def __init__(self):
         """Initialize Azure CLI executor"""
         self.logger = logging.getLogger("aks_net_diagnostics.azure_cli")
+        self.permission_errors = []  # Track permission issues encountered
 
     def execute(self, cmd: List[str], expect_json: bool = True, timeout: Optional[int] = None) -> Any:
         """
@@ -170,3 +171,113 @@ class AzureCLIExecutor:
         if isinstance(result, str) and result.strip():
             return result.strip()
         return ""
+
+    def _is_authorization_error(self, stderr: str) -> bool:
+        """
+        Check if error is due to insufficient permissions
+
+        Args:
+            stderr: Standard error output from Azure CLI
+
+        Returns:
+            True if the error indicates authorization/permission failure
+        """
+        error_lower = stderr.lower()
+
+        auth_patterns = [
+            "authorizationfailed",
+            "does not have authorization",
+            "insufficient privileges",
+            "forbidden",
+            "the client",  # Common in "The client 'user@example.com' does not have authorization..."
+            "(401)",  # HTTP 401 Unauthorized
+            "permission",  # Generic permission errors
+        ]
+
+        return any(pattern in error_lower for pattern in auth_patterns)
+
+    def _extract_permission_action(self, stderr: str, command: List[str]) -> str:
+        """
+        Extract or infer the missing permission from error or command
+
+        Args:
+            stderr: Standard error output from Azure CLI
+            command: The Azure CLI command that failed (without 'az' prefix)
+
+        Returns:
+            Permission action string (e.g., "Microsoft.Network/virtualNetworks/read")
+        """
+        # Try to extract from error message first
+        error_lower = stderr.lower()
+
+        # Common permission patterns in Azure CLI errors
+        if "microsoft.network/virtualnetworks/read" in error_lower:
+            return "Microsoft.Network/virtualNetworks/read"
+        elif "microsoft.compute/virtualmachinescalesets" in error_lower:
+            return "Microsoft.Compute/virtualMachineScaleSets/read"
+        elif "microsoft.network/networksecuritygroups" in error_lower:
+            return "Microsoft.Network/networkSecurityGroups/read"
+        elif "microsoft.network/loadbalancers" in error_lower:
+            return "Microsoft.Network/loadBalancers/read"
+        elif "microsoft.network/privatednszones" in error_lower:
+            return "Microsoft.Network/privateDnsZones/read"
+
+        # Infer from command if not in error message
+        cmd_str = " ".join(command).lower()
+
+        if "vnet" in cmd_str and ("show" in cmd_str or "list" in cmd_str):
+            return "Microsoft.Network/virtualNetworks/read"
+        elif "vmss" in cmd_str and ("show" in cmd_str or "list" in cmd_str):
+            return "Microsoft.Compute/virtualMachineScaleSets/read"
+        elif "nsg" in cmd_str and "show" in cmd_str:
+            return "Microsoft.Network/networkSecurityGroups/read"
+        elif ("lb" in cmd_str or "load-balancer" in cmd_str) and "show" in cmd_str:
+            return "Microsoft.Network/loadBalancers/read"
+        elif "private-dns" in cmd_str:
+            return "Microsoft.Network/privateDnsZones/read"
+        elif "aks" in cmd_str and ("show" in cmd_str or "list" in cmd_str):
+            return "Microsoft.ContainerService/managedClusters/read"
+
+        return "Unknown permission (check Azure Activity Log for details)"
+
+    def execute_with_permission_check(
+        self, cmd: List[str], context: str, expect_json: bool = True, timeout: Optional[int] = None
+    ) -> Optional[Any]:
+        """
+        Execute Azure CLI command with permission error handling.
+
+        Args:
+            cmd: Azure CLI command parts (without 'az' prefix)
+            context: Human-readable context for error messages (e.g., "retrieve VNet details")
+            expect_json: Whether to parse output as JSON
+            timeout: Optional custom timeout in seconds
+
+        Returns:
+            Command output or None if permission error occurred
+
+        Raises:
+            Other exceptions if not a permission error
+        """
+        try:
+            return self.execute(cmd, expect_json=expect_json, timeout=timeout)
+        except subprocess.CalledProcessError as e:
+            stderr_output = e.stderr.strip() if e.stderr else ""
+
+            if self._is_authorization_error(stderr_output):
+                # Permission error - log and track
+                action = self._extract_permission_action(stderr_output, cmd)
+
+                permission_error = {
+                    "context": context,
+                    "command": " ".join(["az"] + cmd),
+                    "permission": action,
+                    "error": stderr_output,
+                }
+                self.permission_errors.append(permission_error)
+
+                self.logger.warning(f"Insufficient permissions to {context}. Required: {action}")
+
+                return None  # Graceful degradation
+            
+            # Not a permission error, re-raise
+            raise
