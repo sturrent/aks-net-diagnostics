@@ -395,12 +395,10 @@ class ReportGenerator:
         """Print outbound connectivity section"""
         network_profile = self.cluster_info.get("networkProfile", {})
         outbound_type = network_profile.get("outboundType", "loadBalancer")
-        
+
         # Check if we have permission issues
-        has_lb_permission_issue = any(
-            f.get("code") == "PERMISSION_INSUFFICIENT_LB" for f in self.findings
-        )
-        
+        has_lb_permission_issue = any(f.get("code") == "PERMISSION_INSUFFICIENT_LB" for f in self.findings)
+
         if self.outbound_ips:
             print("### Outbound Connectivity")
             print(f"- **Type:** {outbound_type}")

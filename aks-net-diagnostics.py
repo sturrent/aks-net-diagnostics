@@ -411,19 +411,19 @@ EXAMPLES:
     def collect_permission_findings(self):
         """Collect permission-related findings from all analyzers"""
         # Collect from cluster data collector
-        if hasattr(self, 'cluster_data_collector') and hasattr(self.cluster_data_collector, 'findings'):
+        if hasattr(self, "cluster_data_collector") and hasattr(self.cluster_data_collector, "findings"):
             for finding in self.cluster_data_collector.findings:
-                self.findings.append(finding.to_dict() if hasattr(finding, 'to_dict') else finding)
+                self.findings.append(finding.to_dict() if hasattr(finding, "to_dict") else finding)
 
         # Collect from outbound analyzer
-        if hasattr(self, 'outbound_analyzer') and hasattr(self.outbound_analyzer, 'findings'):
+        if hasattr(self, "outbound_analyzer") and hasattr(self.outbound_analyzer, "findings"):
             for finding in self.outbound_analyzer.findings:
-                self.findings.append(finding.to_dict() if hasattr(finding, 'to_dict') else finding)
+                self.findings.append(finding.to_dict() if hasattr(finding, "to_dict") else finding)
 
         # Collect from misconfiguration analyzer
-        if hasattr(self, 'misconfiguration_analyzer') and hasattr(self.misconfiguration_analyzer, 'findings'):
+        if hasattr(self, "misconfiguration_analyzer") and hasattr(self.misconfiguration_analyzer, "findings"):
             for finding in self.misconfiguration_analyzer.findings:
-                self.findings.append(finding.to_dict() if hasattr(finding, 'to_dict') else finding)
+                self.findings.append(finding.to_dict() if hasattr(finding, "to_dict") else finding)
 
         # NSG and DNS analyzer findings are already collected in their respective methods
         # Note: Permission findings are created by analyzers with specific context,

@@ -140,9 +140,7 @@ class RouteTableAnalyzer:
                 subnet_name,
             ]
 
-            return self.azure_cli.execute_with_permission_check(
-                cmd, context=f"retrieve subnet '{subnet_name}' details"
-            )
+            return self.azure_cli.execute_with_permission_check(cmd, context=f"retrieve subnet '{subnet_name}' details")
 
         except Exception as e:
             self.logger.debug(f"    Error getting subnet details for {subnet_id}: {e}")

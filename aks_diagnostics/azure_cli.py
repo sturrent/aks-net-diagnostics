@@ -267,7 +267,7 @@ class AzureCLIExecutor:
             return self.execute(cmd, expect_json=expect_json, timeout=timeout)
         except AzureCLIError as e:
             # Check if it's a permission error
-            stderr_output = getattr(e, 'stderr', str(e))
+            stderr_output = getattr(e, "stderr", str(e))
 
             if self._is_authorization_error(stderr_output):
                 # Permission error - log and track
