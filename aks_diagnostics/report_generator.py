@@ -176,7 +176,25 @@ class ReportGenerator:
         is_private = api_server_profile.get("enablePrivateCluster", False) if api_server_profile else False
         print(f"- Private Cluster: {str(is_private).lower()}")
 
-        if self.outbound_ips or (self.outbound_analysis and self.outbound_analysis.get("effectiveOutbound")):
+        # Check if we have permission to retrieve outbound configuration
+        # DEBUG: Print all finding codes
+        permission_lb_findings = [f for f in self.findings if f.get("code") == "PERMISSION_INSUFFICIENT_LB"]
+        has_lb_permission_issue = len(permission_lb_findings) > 0
+
+        network_profile = self.cluster_info.get("networkProfile", {})
+        outbound_type = network_profile.get("outboundType", "loadBalancer")
+
+        # Check if we actually have outbound configuration data to display
+        has_outbound_data = bool(self.outbound_ips) or (
+            self.outbound_analysis
+            and self.outbound_analysis.get("effectiveOutbound")
+            and (
+                self.outbound_analysis.get("effectiveOutbound", {}).get("load_balancer_ips")
+                or self.outbound_analysis.get("effectiveOutbound", {}).get("virtual_appliance_ips")
+            )
+        )
+
+        if has_outbound_data:
             print()
             print("**Outbound Configuration:**")
 
@@ -209,6 +227,12 @@ class ReportGenerator:
                     print("- Outbound IPs:")
                     for ip in self.outbound_ips:
                         print(f"  - {ip}")
+        elif has_lb_permission_issue and outbound_type in ["loadBalancer", "managedNATGateway"]:
+            # We have permission issues and can't show outbound configuration
+            print()
+            print("**Outbound Configuration:**")
+            print(f"- Unable to retrieve {outbound_type} configuration due to insufficient permissions")
+            print("- See permission findings below for details")
 
         print()
         print("**Findings Summary:**")

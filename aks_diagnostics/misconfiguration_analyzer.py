@@ -34,6 +34,7 @@ class MisconfigurationAnalyzer:
         nsg_analysis: Dict[str, Any],
         api_probe_results: Optional[Dict[str, Any]],
         vmss_analysis: List[Dict[str, Any]],
+        outbound_analyzer: Optional[Any] = None,
     ) -> Tuple[List[Dict[str, Any]], bool]:
         """
         Analyze cluster for misconfigurations and generate findings
@@ -47,6 +48,7 @@ class MisconfigurationAnalyzer:
             nsg_analysis: NSG configuration analysis results
             api_probe_results: API connectivity probe results
             vmss_analysis: VMSS configuration analysis
+            outbound_analyzer: OutboundAnalyzer instance (optional, for permission check)
 
         Returns:
             Tuple of (findings list, cluster_stopped flag)
@@ -72,7 +74,7 @@ class MisconfigurationAnalyzer:
             self._analyze_private_dns_issues(cluster_info, private_dns_analysis, findings)
 
         # Check for missing outbound IPs
-        self._check_outbound_ips(cluster_info, outbound_ips, findings)
+        self._check_outbound_ips(cluster_info, outbound_ips, findings, outbound_analyzer)
 
         # Check VNet configuration issues
         self._analyze_vnet_issues(vmss_analysis, findings)
@@ -157,21 +159,37 @@ class MisconfigurationAnalyzer:
             )
 
     def _check_outbound_ips(
-        self, cluster_info: Dict[str, Any], outbound_ips: List[str], findings: List[Dict[str, Any]]
+        self,
+        cluster_info: Dict[str, Any],
+        outbound_ips: List[str],
+        findings: List[Dict[str, Any]],
+        outbound_analyzer: Optional[Any] = None,
     ) -> None:
-        """Check for missing outbound IPs"""
+        """Check for missing outbound IPs (only if we have permissions to check)"""
         network_profile = cluster_info.get("networkProfile", {})
         outbound_type = network_profile.get("outboundType", "loadBalancer")
 
         if not outbound_ips and outbound_type in ["loadBalancer", "managedNATGateway"]:
-            findings.append(
-                {
-                    "severity": "warning",
-                    "code": "NO_OUTBOUND_IPS",
-                    "message": f"No outbound IP addresses detected for {outbound_type} outbound type",
-                    "recommendation": "Verify outbound connectivity configuration. Check that the load balancer or NAT gateway has public IPs assigned.",
-                }
-            )
+            # Check if we had permission issues retrieving load balancer/NAT gateway info
+            has_permission_issue = False
+            if outbound_analyzer and hasattr(outbound_analyzer, "findings"):
+                from .models import FindingCode
+
+                # Check if there's a load balancer permission finding
+                has_permission_issue = any(
+                    finding.code == FindingCode.PERMISSION_INSUFFICIENT_LB for finding in outbound_analyzer.findings
+                )
+
+            # Only create finding if we don't have permission issues
+            if not has_permission_issue:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "NO_OUTBOUND_IPS",
+                        "message": f"No outbound IP addresses detected for {outbound_type} outbound type",
+                        "recommendation": "Verify outbound connectivity configuration. Check that the load balancer or NAT gateway has public IPs assigned.",
+                    }
+                )
 
     def _get_cluster_status_error(self, cluster_info: Dict[str, Any]) -> Optional[Tuple[Optional[str], str]]:
         """Get detailed cluster error information from status field"""

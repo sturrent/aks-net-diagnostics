@@ -370,6 +370,7 @@ EXAMPLES:
             nsg_analysis=self.nsg_analysis,
             api_probe_results=self.api_probe_results,
             vmss_analysis=self.vmss_analysis,
+            outbound_analyzer=self.outbound_analyzer,
         )
 
         # Store results
