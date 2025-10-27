@@ -233,20 +233,20 @@ EXAMPLES:
 
     def analyze_vnet_configuration(self):
         """Analyze VNet configuration using ClusterDataCollector"""
-        collector = ClusterDataCollector(self.azure_cli_executor, self.logger)
-        self.vnets_analysis = collector.collect_vnet_info(self.agent_pools)
+        self.cluster_data_collector = ClusterDataCollector(self.azure_cli_executor, self.logger)
+        self.vnets_analysis = self.cluster_data_collector.collect_vnet_info(self.agent_pools)
 
     def analyze_outbound_connectivity(self):
         """Analyze outbound connectivity configuration using OutboundConnectivityAnalyzer"""
-        analyzer = OutboundConnectivityAnalyzer(
+        self.outbound_analyzer = OutboundConnectivityAnalyzer(
             cluster_info=self.cluster_info,
             agent_pools=self.agent_pools,
             azure_cli=self.azure_cli_executor,
             logger=self.logger,
         )
 
-        self.outbound_analysis = analyzer.analyze(show_details=self.show_details)
-        self.outbound_ips = analyzer.get_outbound_ips()
+        self.outbound_analysis = self.outbound_analyzer.analyze(show_details=self.show_details)
+        self.outbound_ips = self.outbound_analyzer.get_outbound_ips()
 
     def _analyze_node_subnet_udrs(self):
         """Analyze User Defined Routes on node subnets using RouteTableAnalyzer"""
@@ -358,10 +358,10 @@ EXAMPLES:
 
     def analyze_misconfigurations(self):
         """Analyze potential misconfigurations and failures using MisconfigurationAnalyzer"""
-        analyzer = MisconfigurationAnalyzer(self.azure_cli_executor, self.logger)
+        self.misconfiguration_analyzer = MisconfigurationAnalyzer(self.azure_cli_executor, self.logger)
 
         # Run analysis and get findings
-        findings, cluster_stopped = analyzer.analyze(
+        findings, cluster_stopped = self.misconfiguration_analyzer.analyze(
             cluster_info=self.cluster_info,
             outbound_analysis=self.outbound_analysis,
             outbound_ips=self.outbound_ips,
@@ -407,6 +407,27 @@ EXAMPLES:
         if self.json_report:
             report_gen.save_json_report(self.json_report, file_permissions=DEFAULT_FILE_PERMISSIONS)
 
+    def collect_permission_findings(self):
+        """Collect permission-related findings from all analyzers"""
+        # Collect from cluster data collector
+        if hasattr(self, 'cluster_data_collector') and hasattr(self.cluster_data_collector, 'findings'):
+            for finding in self.cluster_data_collector.findings:
+                self.findings.append(finding.to_dict() if hasattr(finding, 'to_dict') else finding)
+
+        # Collect from outbound analyzer
+        if hasattr(self, 'outbound_analyzer') and hasattr(self.outbound_analyzer, 'findings'):
+            for finding in self.outbound_analyzer.findings:
+                self.findings.append(finding.to_dict() if hasattr(finding, 'to_dict') else finding)
+
+        # Collect from misconfiguration analyzer
+        if hasattr(self, 'misconfiguration_analyzer') and hasattr(self.misconfiguration_analyzer, 'findings'):
+            for finding in self.misconfiguration_analyzer.findings:
+                self.findings.append(finding.to_dict() if hasattr(finding, 'to_dict') else finding)
+
+        # NSG and DNS analyzer findings are already collected in their respective methods
+        # Note: Permission findings are created by analyzers with specific context,
+        # so we don't need to duplicate them from azure_cli.permission_errors
+
     def run(self):
         """Main execution method"""
         self.parse_arguments()
@@ -424,6 +445,7 @@ EXAMPLES:
         self.analyze_api_server_access()
         self.check_api_connectivity()
         self.analyze_misconfigurations()
+        self.collect_permission_findings()  # Collect all permission findings before reporting
         self.generate_report()
 
 
