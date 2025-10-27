@@ -190,16 +190,16 @@ EXAMPLES:
             subprocess.run(
                 ["az", "--version"], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS
             )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            raise FileNotFoundError("Azure CLI is not installed or not in PATH")
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            raise FileNotFoundError("Azure CLI is not installed or not in PATH") from exc
 
         # Check if logged in
         try:
             subprocess.run(
                 ["az", "account", "show"], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS
             )
-        except subprocess.CalledProcessError:
-            raise PermissionError("Not logged in to Azure. Run 'az login' first.")
+        except subprocess.CalledProcessError as exc:
+            raise PermissionError("Not logged in to Azure. Run 'az login' first.") from exc
 
         # Set subscription if provided
         if self.subscription:
@@ -212,8 +212,8 @@ EXAMPLES:
                     shell=IS_WINDOWS,
                 )
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
-            except subprocess.CalledProcessError:
-                raise ValueError(f"Failed to set subscription: {self.subscription}")
+            except subprocess.CalledProcessError as exc:
+                raise ValueError(f"Failed to set subscription: {self.subscription}") from exc
         else:
             # Get current subscription
             current_sub = self.azure_cli_executor.execute(
@@ -346,8 +346,8 @@ EXAMPLES:
             import urllib.error
             import urllib.request
 
-            response = urllib.request.urlopen("https://api.ipify.org", timeout=5)
-            return response.read().decode("utf-8").strip()
+            with urllib.request.urlopen("https://api.ipify.org", timeout=5) as response:
+                return response.read().decode("utf-8").strip()
         except Exception:
             return None
 

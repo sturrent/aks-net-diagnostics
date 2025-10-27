@@ -214,9 +214,7 @@ class MisconfigurationAnalyzer:
         elif private_dns_zone and private_dns_zone != "system":
             self._check_private_dns_vnet_links(cluster_info, private_dns_zone, findings)
 
-    def _check_system_private_dns_issues(
-        self, cluster_info: Dict[str, Any], findings: List[Dict[str, Any]]
-    ) -> None:
+    def _check_system_private_dns_issues(self, cluster_info: Dict[str, Any], findings: List[Dict[str, Any]]) -> None:
         """Check system-managed private DNS zone issues"""
         try:
             cmd = ["network", "private-dns", "zone", "list", "-o", "json"]
@@ -291,60 +289,60 @@ class MisconfigurationAnalyzer:
     def _get_cluster_vnets_with_dns(self, cluster_info: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Get cluster VNets with their DNS configurations"""
         vnets = []
-        
+
         try:
             # Get agent pools to find subnet IDs
             agent_pools = cluster_info.get("agentPoolProfiles", [])
             if not agent_pools:
                 return vnets
-            
+
             # Collect unique VNet IDs from agent pool subnets
             vnet_ids_seen = set()
-            
+
             for pool in agent_pools:
                 subnet_id = pool.get("vnetSubnetId")
                 if not subnet_id or subnet_id == "null":
                     continue
-                
+
                 # Extract VNet info from subnet ID
                 # Format: /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{subnet}
                 parts = subnet_id.split("/")
                 if len(parts) < 9:
                     continue
-                
+
                 vnet_rg = parts[4]
                 vnet_name = parts[8]
                 vnet_id = "/".join(parts[:9])  # VNet ID without subnet part
-                
+
                 if vnet_id in vnet_ids_seen:
                     continue
-                
+
                 vnet_ids_seen.add(vnet_id)
-                
+
                 # Get VNet details including DNS servers
                 cmd = ["network", "vnet", "show", "-g", vnet_rg, "-n", vnet_name, "-o", "json"]
                 vnet_data = self.azure_cli.execute(cmd)
-                
+
                 if not isinstance(vnet_data, dict):
                     continue
-                
+
                 dns_servers = vnet_data.get("dhcpOptions", {}).get("dnsServers", [])
-                
-                vnets.append({
-                    "id": vnet_data.get("id", ""),
-                    "name": vnet_data.get("name", ""),
-                    "resourceGroup": vnet_rg,
-                    "dnsServers": dns_servers
-                })
-        
+
+                vnets.append(
+                    {
+                        "id": vnet_data.get("id", ""),
+                        "name": vnet_data.get("name", ""),
+                        "resourceGroup": vnet_rg,
+                        "dnsServers": dns_servers,
+                    }
+                )
+
         except Exception as e:
             self.logger.debug(f"Error getting cluster VNets with DNS: {e}")
-        
+
         return vnets
 
-    def _find_dns_server_host_vnet(
-        self, dns_server_ip: str, cluster_info: Dict[str, Any]
-    ) -> Optional[Dict[str, str]]:
+    def _find_dns_server_host_vnet(self, dns_server_ip: str, cluster_info: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """
         Find which VNet hosts the given DNS server IP by checking only peered VNets.
         Returns the most specific match (highest prefix length) to avoid matching overly broad VNets.

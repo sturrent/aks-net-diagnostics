@@ -105,8 +105,8 @@ class InputValidator:
 
         try:
             resolved_path.relative_to(current_dir)
-        except ValueError:
-            raise ValidationError("Output file path must be within the current directory")
+        except ValueError as exc:
+            raise ValidationError("Output file path must be within the current directory") from exc
 
         # Ensure the filename has a safe extension
         if not str(resolved_path).lower().endswith(".json"):

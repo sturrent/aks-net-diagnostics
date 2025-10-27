@@ -240,14 +240,14 @@ class RouteTableAnalyzer:
             self.logger.info(f"    Error analyzing route: {e}")
             return None
 
-    def _assess_route_impact(self, address_prefix: str, next_hop_type: str, next_hop_ip: str) -> Dict[str, Any]:
+    def _assess_route_impact(self, address_prefix: str, next_hop_type: str, _next_hop_ip: str) -> Dict[str, Any]:
         """
         Assess the potential impact of a route on AKS connectivity.
 
         Args:
             address_prefix: CIDR range covered by the route
             next_hop_type: Azure next hop type (VirtualAppliance, Internet, None, etc.)
-            next_hop_ip: IP address of the next hop (if applicable)
+            _next_hop_ip: IP address of the next hop (reserved for future use)
 
         Returns:
             Dictionary containing severity, description, and affected traffic types

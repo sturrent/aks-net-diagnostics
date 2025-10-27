@@ -281,7 +281,7 @@ class DNSAnalyzer:
             dns_server_ips = set()
             in_server_section = False
 
-            for i, line in enumerate(lines):
+            for line in lines:
                 line_lower = line.lower()
                 # Check if this line indicates DNS server info
                 if "server:" in line_lower:
