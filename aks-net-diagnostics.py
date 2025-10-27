@@ -260,8 +260,6 @@ EXAMPLES:
 
     def analyze_nsg_configuration(self):
         """Analyze Network Security Group configuration for AKS nodes using modular NSGAnalyzer"""
-        self.logger.info("Analyzing NSG configuration...")
-
         try:
             # Create NSG analyzer instance with the new modular component
             nsg_analyzer = NSGAnalyzer(
