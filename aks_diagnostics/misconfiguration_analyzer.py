@@ -851,11 +851,37 @@ class MisconfigurationAnalyzer:
             )
 
         if error_tests:
-            findings.append(
-                {
-                    "severity": "warning",
-                    "code": "CONNECTIVITY_TEST_ERRORS",
-                    "message": f"{len(error_tests)} connectivity tests could not be executed",
-                    "recommendation": "Check VMSS instance status and run-command permissions. Ensure instances are running and accessible.",
-                }
-            )
+            # Check if errors are due to authorization/permission issues
+            auth_errors = [
+                t
+                for t in error_tests
+                if "AuthorizationFailed" in str(t.get("analysis", ""))
+                or "does not have authorization" in str(t.get("analysis", ""))
+                or "runCommand/action" in str(t.get("analysis", ""))
+            ]
+
+            if auth_errors:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "CONNECTIVITY_TEST_ERRORS",
+                        "message": f"{len(error_tests)} connectivity tests could not be executed due to insufficient permissions",
+                        "recommendation": (
+                            "Grant the following permission to run connectivity tests from VMSS instances:\n"
+                            "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/runCommand/action\n\n"
+                            "To grant this permission, assign the 'Virtual Machine Contributor' role or create a custom role:\n"
+                            "az role assignment create --assignee <service-principal-id> \\\n"
+                            "  --role 'Virtual Machine Contributor' \\\n"
+                            "  --scope /subscriptions/<subscription-id>/resourceGroups/<MC_resource_group>"
+                        ),
+                    }
+                )
+            else:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "CONNECTIVITY_TEST_ERRORS",
+                        "message": f"{len(error_tests)} connectivity tests could not be executed",
+                        "recommendation": "Check VMSS instance status and run-command permissions. Ensure instances are running and accessible.",
+                    }
+                )
