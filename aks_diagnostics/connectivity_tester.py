@@ -149,8 +149,8 @@ class ConnectivityTester:
         # Check for permission error (None) vs empty list (no VMSS)
         if vmss_list is None:
             self.logger.warning(
-                f"Unable to list VMSS instances for connectivity testing. "
-                f"Skipping active probes. Required permission: Microsoft.Compute/virtualMachineScaleSets/read"
+                "Unable to list VMSS instances for connectivity testing. "
+                "Skipping active probes. Required permission: Microsoft.Compute/virtualMachineScaleSets/read"
             )
             # Set probe results to indicate permission issue
             self.probe_results = {
