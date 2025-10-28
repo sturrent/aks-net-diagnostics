@@ -32,7 +32,7 @@ class ReportGenerator:
         nsg_analysis: Dict[str, Any],
         api_probe_results: Optional[Dict[str, Any]] = None,
         failure_analysis: Optional[Dict[str, Any]] = None,
-        script_version: str = "1.1.2",
+        script_version: str = "1.2.0",
         logger: Optional[logging.Logger] = None,
     ):
         """
@@ -129,7 +129,7 @@ class ReportGenerator:
         try:
             report_data = self.generate_json_report()
 
-            with open(filepath, "w") as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(report_data, f, indent=2)
 
             # Set secure file permissions
@@ -176,7 +176,25 @@ class ReportGenerator:
         is_private = api_server_profile.get("enablePrivateCluster", False) if api_server_profile else False
         print(f"- Private Cluster: {str(is_private).lower()}")
 
-        if self.outbound_ips or (self.outbound_analysis and self.outbound_analysis.get("effectiveOutbound")):
+        # Check if we have permission to retrieve outbound configuration
+        # DEBUG: Print all finding codes
+        permission_lb_findings = [f for f in self.findings if f.get("code") == "PERMISSION_INSUFFICIENT_LB"]
+        has_lb_permission_issue = len(permission_lb_findings) > 0
+
+        network_profile = self.cluster_info.get("networkProfile", {})
+        outbound_type = network_profile.get("outboundType", "loadBalancer")
+
+        # Check if we actually have outbound configuration data to display
+        has_outbound_data = bool(self.outbound_ips) or (
+            self.outbound_analysis
+            and self.outbound_analysis.get("effectiveOutbound")
+            and (
+                self.outbound_analysis.get("effectiveOutbound", {}).get("load_balancer_ips")
+                or self.outbound_analysis.get("effectiveOutbound", {}).get("virtual_appliance_ips")
+            )
+        )
+
+        if has_outbound_data:
             print()
             print("**Outbound Configuration:**")
 
@@ -209,29 +227,77 @@ class ReportGenerator:
                     print("- Outbound IPs:")
                     for ip in self.outbound_ips:
                         print(f"  - {ip}")
+        elif has_lb_permission_issue and outbound_type in ["loadBalancer", "managedNATGateway"]:
+            # We have permission issues and can't show outbound configuration
+            print()
+            print("**Outbound Configuration:**")
+            print("- Unable to retrieve {outbound_type} configuration due to insufficient permissions")
+            print("- See permission findings below for details")
+
+        # Add connectivity test summary if probe tests were enabled
+        if self.api_probe_results and self.api_probe_results.get("enabled"):
+            print()
+            print("**Connectivity Tests:**")
+            summary = self.api_probe_results.get("summary", {})
+            total = summary.get("total_tests", 0)
+            passed = summary.get("passed", 0)
+            failed = summary.get("failed", 0)
+            errors = summary.get("errors", 0)
+
+            print(f"- **Total Tests:** {total}")
+            if passed > 0:
+                print(f"- **[OK] Passed:** {passed}")
+            if failed > 0:
+                print(f"- **[FAILED] Tests Failed:** {failed}")
+            if errors > 0:
+                print(f"- **[ERROR] Could Not Execute:** {errors}")
+        elif self.api_probe_results and self.api_probe_results.get("skipped"):
+            # Probe tests were requested but skipped due to permission or cluster state
+            print()
+            print("**Connectivity Tests:**")
+            reason = self.api_probe_results.get("reason", "Unknown")
+            if reason == "permission_denied":
+                print("- **Status:** Skipped due to insufficient permissions")
+            elif reason == "Cluster is stopped":
+                print("- **Status:** Skipped (cluster is stopped)")
+            else:
+                print(f"- **Status:** Skipped ({reason})")
 
         print()
         print("**Findings Summary:**")
 
-        critical_findings = [f for f in self.findings if f.get("severity") in ["critical", "error"]]
+        critical_findings = [f for f in self.findings if f.get("severity") == "critical"]
+        high_findings = [f for f in self.findings if f.get("severity") == "high"]
         warning_findings = [f for f in self.findings if f.get("severity") == "warning"]
+        info_findings = [f for f in self.findings if f.get("severity") == "info"]
 
-        if len(critical_findings) == 0 and len(warning_findings) == 0:
-            print("- [OK] No critical issues detected")
+        if (
+            len(critical_findings) == 0
+            and len(high_findings) == 0
+            and len(warning_findings) == 0
+            and len(info_findings) == 0
+        ):
+            print("- [OK] No issues detected")
         else:
-            # Show critical/error findings
+            # Show critical findings
             for finding in critical_findings:
-                # For cluster operation failures, show only the error code in summary mode
-                if finding.get("code") == "CLUSTER_OPERATION_FAILURE" and finding.get("error_code"):
-                    print(f"- [ERROR] Cluster failed with error: {finding.get('error_code')}")
-                else:
-                    message = finding.get("message", "Unknown issue")
-                    print(f"- [ERROR] {message}")
+                message = finding.get("message", "Unknown issue")
+                print(f"- [CRITICAL] {message}")
+
+            # Show high severity findings
+            for finding in high_findings:
+                message = finding.get("message", "Unknown issue")
+                print(f"- [HIGH] {message}")
 
             # Show warning findings
             for finding in warning_findings:
                 message = finding.get("message", "Unknown issue")
                 print(f"- [WARNING] {message}")
+
+            # Show info findings (if any)
+            for finding in info_findings:
+                message = finding.get("message", "Unknown issue")
+                print(f"- [INFO] {message}")
 
         print()
         if json_report_path:
@@ -356,13 +422,25 @@ class ReportGenerator:
 
     def _print_outbound_connectivity(self):
         """Print outbound connectivity section"""
+        network_profile = self.cluster_info.get("networkProfile", {})
+        outbound_type = network_profile.get("outboundType", "loadBalancer")
+
+        # Check if we have permission issues
+        has_lb_permission_issue = any(f.get("code") == "PERMISSION_INSUFFICIENT_LB" for f in self.findings)
+
         if self.outbound_ips:
-            network_profile = self.cluster_info.get("networkProfile", {})
             print("### Outbound Connectivity")
-            print(f"- **Type:** {network_profile.get('outboundType', 'loadBalancer')}")
+            print(f"- **Type:** {outbound_type}")
             print("- **Effective Public IPs:**")
             for ip in self.outbound_ips:
                 print(f"  - {ip}")
+            print()
+        elif has_lb_permission_issue and outbound_type in ["loadBalancer", "managedNATGateway"]:
+            # Show permission issue message
+            print("### Outbound Connectivity")
+            print(f"- **Type:** {outbound_type}")
+            print(f"- **Status:** Unable to retrieve {outbound_type} configuration due to insufficient permissions")
+            print("- **Action:** See permission findings below for details")
             print()
 
     def _print_udr_analysis(self):
@@ -415,7 +493,12 @@ class ReportGenerator:
 
             if self.api_probe_results.get("skipped"):
                 reason = self.api_probe_results.get("reason", "Unknown reason")
-                print(f"- **Status:** Skipped ({reason})")
+                if reason == "permission_denied":
+                    print("- **Status:** Skipped due to insufficient permissions")
+                elif reason == "Cluster is stopped":
+                    print("- **Status:** Skipped (cluster is stopped)")
+                else:
+                    print(f"- **Status:** Skipped ({reason})")
                 print()
             else:
                 summary = self.api_probe_results.get("summary", {})
@@ -424,13 +507,13 @@ class ReportGenerator:
                 failed = summary.get("failed", 0)
                 errors = summary.get("errors", 0)
 
-                print(f"- **Tests Executed:** {total}")
+                print(f"- **Total Tests:** {total}")
                 if passed > 0:
                     print(f"- **[OK] Passed:** {passed}")
                 if failed > 0:
-                    print(f"- **X Failed:** {failed}")
+                    print(f"- **[FAILED] Tests Failed:** {failed}")
                 if errors > 0:
-                    print(f"- **[WARNING] Errors:** {errors}")
+                    print(f"- **[ERROR] Could Not Execute:** {errors}")
 
                 # Show detailed results
                 tests = self.api_probe_results.get("tests", [])
@@ -586,7 +669,7 @@ class ReportGenerator:
 
             # Count findings by severity
             critical_count = len([f for f in self.findings if f.get("severity") == "critical"])
-            error_count = len([f for f in self.findings if f.get("severity") == "error"])
+            high_count = len([f for f in self.findings if f.get("severity") == "high"])
             warning_count = len([f for f in self.findings if f.get("severity") == "warning"])
             info_count = len([f for f in self.findings if f.get("severity") == "info"])
 
@@ -594,8 +677,8 @@ class ReportGenerator:
             print("**Findings Summary:**")
             if critical_count > 0:
                 print(f"- [CRITICAL] {critical_count}")
-            if error_count > 0:
-                print(f"- [ERROR] {error_count}")
+            if high_count > 0:
+                print(f"- [HIGH] {high_count}")
             if warning_count > 0:
                 print(f"- [WARNING] {warning_count}")
             if info_count > 0:
@@ -603,7 +686,7 @@ class ReportGenerator:
             print()
 
             # Define severity order (most severe first)
-            severity_order = {"critical": 0, "high": 1, "error": 1, "warning": 2, "info": 3}
+            severity_order = {"critical": 0, "high": 1, "warning": 2, "info": 3}
 
             # Sort findings by severity (most severe first)
             sorted_findings = sorted(self.findings, key=lambda f: severity_order.get(f.get("severity", "info"), 3))
@@ -612,7 +695,7 @@ class ReportGenerator:
             for finding in sorted_findings:
                 severity_icon = {
                     "critical": "[CRITICAL]",
-                    "error": "[ERROR]",
+                    "high": "[HIGH]",
                     "warning": "[WARNING]",
                     "info": "[INFO]",
                 }.get(finding.get("severity", "info"), "[INFO]")

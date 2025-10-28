@@ -5,6 +5,53 @@ All notable changes to the AKS Network Diagnostics tool will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres on [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2025-10-28
+
+### Added
+- **Permission Handling Feature**: Graceful handling of insufficient Azure RBAC permissions
+  - New finding codes: `PERMISSION_INSUFFICIENT_VNET`, `PERMISSION_INSUFFICIENT_VMSS`, `PERMISSION_INSUFFICIENT_LB`, `PERMISSION_INSUFFICIENT_PROBE_TEST`
+  - Permission error detection in all Azure CLI operations
+  - Specific permission recommendations with example `az role assignment` commands
+  - Tool continues analysis with partial data when permissions are insufficient
+  - Permission findings displayed in separate section of report
+- **Connectivity Test Summary**: Added connectivity test results to report summary
+  - Shows total tests, passed, failed, and could not execute counts
+  - Consistent formatting between summary and detailed reports
+  - Clear distinction between test failures (ran but failed) and permission errors (could not execute)
+- **Enhanced Error Detection**: Improved connectivity test error analysis
+  - Detects `AuthorizationFailed` patterns in test failures
+  - Identifies missing `runCommand/action` permission
+  - Recommends `Virtual Machine Contributor` role on MC resource group
+
+### Changed
+- **Connectivity Tester**: Updated VMSS operations to use permission-aware execution
+  - VMSS list operations now use `execute_with_permission_check()`
+  - Handles permission errors gracefully without crashing
+  - Creates permission findings when VMSS operations fail
+- **Report Generator**: Enhanced connectivity test reporting
+  - Added connectivity tests section to both summary and detailed reports
+  - Improved labels: "Tests Failed" vs "Could Not Execute"
+  - Shows execution status for skipped tests (permission_denied, cluster stopped)
+
+### Fixed
+- **Probe Test Crash**: Fixed crash when using `--probe-test` flag with limited permissions
+  - Tool now handles permission errors gracefully
+  - Creates appropriate permission findings instead of crashing
+  - Provides actionable guidance on required permissions
+
+### Documentation
+- **Permission Handling Plan**: Added comprehensive plan for permission handling implementation
+  - Documented 15 commits for permission handling feature
+  - Added test scenarios and validation checklist
+  - Documented required permissions for all operations
+
+### Known Issues
+- **Azure CLI Bug**: Azure CLI v2.78.0 has a bug where `vmss run-command invoke` returns "This is a sample script" instead of actual command output
+  - Tracked in Azure CLI issue [#32286](https://github.com/Azure/azure-cli/issues/32286)
+  - Fix merged in PR [#32280](https://github.com/Azure/azure-cli/pull/32280)
+  - Workaround: Use Azure CLI v2.77 or wait for v2.78.1/v2.79.0
+  - Our tool handles this gracefully by reporting execution errors
+
 ## [1.1.2] - 2025-10-17
 
 ### Added

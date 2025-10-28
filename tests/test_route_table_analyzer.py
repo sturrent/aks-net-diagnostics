@@ -83,15 +83,15 @@ class TestRouteTableAnalyzer(unittest.TestCase):
             "routeTable": {"id": "/subscriptions/sub1/resourceGroups/rg1/providers/Microsoft.Network/routeTables/rt1"},
         }
 
-        self.mock_azure_cli.execute.return_value = mock_subnet_data
+        self.mock_azure_cli.execute_with_permission_check.return_value = mock_subnet_data
 
         result = self.analyzer._get_subnet_details(subnet_id)
 
         self.assertEqual(result, mock_subnet_data)
-        self.mock_azure_cli.execute.assert_called_once()
+        self.mock_azure_cli.execute_with_permission_check.assert_called_once()
 
         # Verify correct CLI command
-        call_args = self.mock_azure_cli.execute.call_args[0][0]
+        call_args = self.mock_azure_cli.execute_with_permission_check.call_args[0][0]
         self.assertIn("network", call_args)
         self.assertIn("vnet", call_args)
         self.assertIn("subnet", call_args)
@@ -350,7 +350,9 @@ class TestRouteTableAnalyzer(unittest.TestCase):
         }
 
         # Setup mock to return different responses
-        self.mock_azure_cli.execute.side_effect = [mock_subnet_data, mock_route_table_data]
+        # First call is execute_with_permission_check for subnet, second is execute for route table
+        self.mock_azure_cli.execute_with_permission_check.return_value = mock_subnet_data
+        self.mock_azure_cli.execute.return_value = mock_route_table_data
 
         result = self.analyzer.analyze()
 

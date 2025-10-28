@@ -62,6 +62,9 @@ venv.bak/
 *~
 .DS_Store
 
+# GitHub Copilot instructions (internal development docs)
+.github/instructions/
+
 # AKS Diagnostics specific
 aks-net-diagnostics_*.json
 .aks_cache/

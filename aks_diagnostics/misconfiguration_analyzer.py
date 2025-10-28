@@ -22,6 +22,7 @@ class MisconfigurationAnalyzer:
         self.azure_cli = azure_cli_executor
         self.logger = logger or logging.getLogger(__name__)
         self._cluster_stopped = False
+        self.findings = []  # Store permission-related findings
 
     def analyze(
         self,
@@ -33,6 +34,7 @@ class MisconfigurationAnalyzer:
         nsg_analysis: Dict[str, Any],
         api_probe_results: Optional[Dict[str, Any]],
         vmss_analysis: List[Dict[str, Any]],
+        outbound_analyzer: Optional[Any] = None,
     ) -> Tuple[List[Dict[str, Any]], bool]:
         """
         Analyze cluster for misconfigurations and generate findings
@@ -46,6 +48,7 @@ class MisconfigurationAnalyzer:
             nsg_analysis: NSG configuration analysis results
             api_probe_results: API connectivity probe results
             vmss_analysis: VMSS configuration analysis
+            outbound_analyzer: OutboundAnalyzer instance (optional, for permission check)
 
         Returns:
             Tuple of (findings list, cluster_stopped flag)
@@ -71,7 +74,7 @@ class MisconfigurationAnalyzer:
             self._analyze_private_dns_issues(cluster_info, private_dns_analysis, findings)
 
         # Check for missing outbound IPs
-        self._check_outbound_ips(cluster_info, outbound_ips, findings)
+        self._check_outbound_ips(cluster_info, outbound_ips, findings, outbound_analyzer)
 
         # Check VNet configuration issues
         self._analyze_vnet_issues(vmss_analysis, findings)
@@ -82,8 +85,7 @@ class MisconfigurationAnalyzer:
         # Check API server access configuration issues
         self._analyze_api_server_access_issues(api_server_access_analysis, findings)
 
-        # Check NSG configuration issues
-        self._analyze_nsg_issues(nsg_analysis, findings)
+        # NSG findings are already created by NSG analyzer - no need to duplicate them here
 
         # Check connectivity test results (only if cluster is running)
         if not self._cluster_stopped:
@@ -157,21 +159,37 @@ class MisconfigurationAnalyzer:
             )
 
     def _check_outbound_ips(
-        self, cluster_info: Dict[str, Any], outbound_ips: List[str], findings: List[Dict[str, Any]]
+        self,
+        cluster_info: Dict[str, Any],
+        outbound_ips: List[str],
+        findings: List[Dict[str, Any]],
+        outbound_analyzer: Optional[Any] = None,
     ) -> None:
-        """Check for missing outbound IPs"""
+        """Check for missing outbound IPs (only if we have permissions to check)"""
         network_profile = cluster_info.get("networkProfile", {})
         outbound_type = network_profile.get("outboundType", "loadBalancer")
 
         if not outbound_ips and outbound_type in ["loadBalancer", "managedNATGateway"]:
-            findings.append(
-                {
-                    "severity": "warning",
-                    "code": "NO_OUTBOUND_IPS",
-                    "message": f"No outbound IP addresses detected for {outbound_type} outbound type",
-                    "recommendation": "Verify outbound connectivity configuration. Check that the load balancer or NAT gateway has public IPs assigned.",
-                }
-            )
+            # Check if we had permission issues retrieving load balancer/NAT gateway info
+            has_permission_issue = False
+            if outbound_analyzer and hasattr(outbound_analyzer, "findings"):
+                from .models import FindingCode
+
+                # Check if there's a load balancer permission finding
+                has_permission_issue = any(
+                    finding.code == FindingCode.PERMISSION_INSUFFICIENT_LB for finding in outbound_analyzer.findings
+                )
+
+            # Only create finding if we don't have permission issues
+            if not has_permission_issue:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "NO_OUTBOUND_IPS",
+                        "message": f"No outbound IP addresses detected for {outbound_type} outbound type",
+                        "recommendation": "Verify outbound connectivity configuration. Check that the load balancer or NAT gateway has public IPs assigned.",
+                    }
+                )
 
     def _get_cluster_status_error(self, cluster_info: Dict[str, Any]) -> Optional[Tuple[Optional[str], str]]:
         """Get detailed cluster error information from status field"""
@@ -210,15 +228,34 @@ class MisconfigurationAnalyzer:
         private_dns_zone = api_server_profile.get("privateDnsZone", "")
 
         if private_dns_zone == "system":
-            self._check_system_private_dns_issues(findings)
+            self._check_system_private_dns_issues(cluster_info, findings)
         elif private_dns_zone and private_dns_zone != "system":
             self._check_private_dns_vnet_links(cluster_info, private_dns_zone, findings)
 
-    def _check_system_private_dns_issues(self, findings: List[Dict[str, Any]]) -> None:
+    def _check_system_private_dns_issues(self, cluster_info: Dict[str, Any], findings: List[Dict[str, Any]]) -> None:
         """Check system-managed private DNS zone issues"""
         try:
             cmd = ["network", "private-dns", "zone", "list", "-o", "json"]
-            zones = self.azure_cli.execute(cmd)
+            zones = self.azure_cli.execute_with_permission_check(cmd, "list private DNS zones")
+
+            if zones is None:
+                # Permission denied
+                from .models import Finding, FindingCode
+
+                finding = Finding.create_warning(
+                    code=FindingCode.PERMISSION_INSUFFICIENT_DNS,
+                    message="Insufficient permissions to list private DNS zones",
+                    recommendation=(
+                        "Grant the following permission to analyze private DNS configuration:\n"
+                        "  Microsoft.Network/privateDnsZones/read\n\n"
+                        "Example Azure CLI command:\n"
+                        "  az role assignment create --assignee <user-principal-id> \\\n"
+                        "    --role 'DNS Zone Contributor' \\\n"
+                        "    --scope '/subscriptions/<sub-id>'"
+                    ),
+                )
+                self.findings.append(finding)
+                return
 
             aks_private_zones = []
             if isinstance(zones, list):
@@ -235,23 +272,32 @@ class MisconfigurationAnalyzer:
                 zone_rg = zone.get("resourceGroup", "")
 
                 if zone_rg and zone_name:
-                    self._check_dns_server_vnet_links(zone_rg, zone_name, findings)
+                    self._check_dns_server_vnet_links(cluster_info, zone_rg, zone_name, findings)
 
         except Exception as e:
             self.logger.info(f"Could not analyze system private DNS issues: {e}")
 
-    def _check_dns_server_vnet_links(self, zone_rg: str, zone_name: str, findings: List[Dict[str, Any]]) -> None:
+    def _check_dns_server_vnet_links(
+        self, cluster_info: Dict[str, Any], zone_rg: str, zone_name: str, findings: List[Dict[str, Any]]
+    ) -> None:
         """Check if VNets with custom DNS servers are properly linked to private DNS zone"""
         try:
             cmd = ["network", "private-dns", "link", "vnet", "list", "-g", zone_rg, "-z", zone_name, "-o", "json"]
-            links = self.azure_cli.execute(cmd)
+            links = self.azure_cli.execute_with_permission_check(
+                cmd, f"list VNet links for private DNS zone '{zone_name}'"
+            )
+
+            if links is None:
+                # Permission denied - already logged, just return
+                self.logger.debug(f"Skipping VNet links check for '{zone_name}' due to insufficient permissions")
+                return
 
             if not isinstance(links, list):
                 return
 
             linked_vnet_ids = [link.get("virtualNetwork", {}).get("id", "") for link in links]
 
-            cluster_vnets = self._get_cluster_vnets_with_dns()
+            cluster_vnets = self._get_cluster_vnets_with_dns(cluster_info)
 
             for vnet_info in cluster_vnets:
                 _vnet_id = vnet_info.get("id", "")  # noqa: F841
@@ -260,7 +306,15 @@ class MisconfigurationAnalyzer:
 
                 if dns_servers:
                     for dns_server in dns_servers:
-                        dns_host_vnet = self._find_dns_server_host_vnet(dns_server)
+                        self.logger.debug(f"Looking up VNet for DNS server: {dns_server}")
+                        dns_host_vnet = self._find_dns_server_host_vnet(dns_server, cluster_info)
+
+                        if dns_host_vnet:
+                            self.logger.debug(
+                                f"Found DNS server {dns_server} in VNet: {dns_host_vnet.get('name', 'unknown')}"
+                            )
+                        else:
+                            self.logger.debug(f"Could not find VNet for DNS server: {dns_server}")
 
                         if dns_host_vnet and dns_host_vnet.get("id") not in linked_vnet_ids:
                             dns_host_vnet_name = dns_host_vnet.get("name", "unknown")
@@ -276,40 +330,177 @@ class MisconfigurationAnalyzer:
         except Exception as e:
             self.logger.info(f"Could not check DNS server VNet links: {e}")
 
-    def _get_cluster_vnets_with_dns(self) -> List[Dict[str, Any]]:
+    def _get_cluster_vnets_with_dns(self, cluster_info: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Get cluster VNets with their DNS configurations"""
         vnets = []
 
-        # Note: This method needs cluster_info to get agent pools
-        # For now, we'll return empty list and let the caller pass this data
-        # This is a design consideration - might need to refactor
+        try:
+            # Get agent pools to find subnet IDs
+            agent_pools = cluster_info.get("agentPoolProfiles", [])
+            if not agent_pools:
+                return vnets
+
+            # Collect unique VNet IDs from agent pool subnets
+            vnet_ids_seen = set()
+
+            for pool in agent_pools:
+                subnet_id = pool.get("vnetSubnetId")
+                if not subnet_id or subnet_id == "null":
+                    continue
+
+                # Extract VNet info from subnet ID
+                # Format: /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{subnet}
+                parts = subnet_id.split("/")
+                if len(parts) < 9:
+                    continue
+
+                vnet_rg = parts[4]
+                vnet_name = parts[8]
+                vnet_id = "/".join(parts[:9])  # VNet ID without subnet part
+
+                if vnet_id in vnet_ids_seen:
+                    continue
+
+                vnet_ids_seen.add(vnet_id)
+
+                # Get VNet details including DNS servers with permission handling
+                cmd = ["network", "vnet", "show", "-g", vnet_rg, "-n", vnet_name, "-o", "json"]
+                vnet_data = self.azure_cli.execute_with_permission_check(cmd, f"retrieve VNet '{vnet_name}' details")
+
+                if vnet_data is None:
+                    # Permission denied - skip this VNet
+                    self.logger.debug(f"Skipping VNet '{vnet_name}' due to insufficient permissions")
+                    continue
+
+                if not isinstance(vnet_data, dict):
+                    continue
+
+                dns_servers = vnet_data.get("dhcpOptions", {}).get("dnsServers", [])
+
+                vnets.append(
+                    {
+                        "id": vnet_data.get("id", ""),
+                        "name": vnet_data.get("name", ""),
+                        "resourceGroup": vnet_rg,
+                        "dnsServers": dns_servers,
+                    }
+                )
+
+        except Exception as e:
+            self.logger.debug(f"Error getting cluster VNets with DNS: {e}")
 
         return vnets
 
-    def _find_dns_server_host_vnet(self, dns_server_ip: str) -> Optional[Dict[str, str]]:
-        """Find which VNet hosts the given DNS server IP"""
+    def _find_dns_server_host_vnet(self, dns_server_ip: str, cluster_info: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """
+        Find which VNet hosts the given DNS server IP by checking only peered VNets.
+        Returns the most specific match (highest prefix length) to avoid matching overly broad VNets.
+        """
         try:
-            cmd = ["network", "vnet", "list", "-o", "json"]
-            vnets = self.azure_cli.execute(cmd)
-
-            if not isinstance(vnets, list):
+            # Get cluster VNet IDs
+            cluster_vnet_ids = self._get_cluster_vnet_ids(cluster_info)
+            if not cluster_vnet_ids:
+                self.logger.debug("No cluster VNet IDs found")
                 return None
 
             dns_ip = ipaddress.ip_address(dns_server_ip)
+            best_match = None
+            smallest_prefix_len = -1
 
-            for vnet in vnets:
-                address_prefixes = vnet.get("addressSpace", {}).get("addressPrefixes", [])
-                for prefix in address_prefixes:
-                    try:
-                        network = ipaddress.ip_network(prefix, strict=False)
-                        if dns_ip in network:
-                            return {
-                                "id": vnet.get("id", ""),
-                                "name": vnet.get("name", ""),
-                                "resourceGroup": vnet.get("resourceGroup", ""),
-                            }
-                    except Exception:
+            # Check each cluster VNet and its peerings
+            for vnet_id in cluster_vnet_ids:
+                # Parse VNet resource ID: /subscriptions/{sub}/resourceGroups/{rg}/.../virtualNetworks/{name}
+                parts = vnet_id.split("/")
+                if len(parts) < 9:
+                    continue
+
+                vnet_rg = parts[4]
+                vnet_name = parts[8]
+
+                # Get VNet details including peerings with permission handling
+                cmd = ["network", "vnet", "show", "-g", vnet_rg, "-n", vnet_name, "-o", "json"]
+                vnet_data = self.azure_cli.execute_with_permission_check(
+                    cmd, f"retrieve VNet '{vnet_name}' for DNS server lookup"
+                )
+
+                if vnet_data is None:
+                    # Permission denied - skip this VNet
+                    self.logger.debug(
+                        f"Skipping VNet '{vnet_name}' for DNS server lookup due to insufficient permissions"
+                    )
+                    continue
+
+                if not isinstance(vnet_data, dict):
+                    continue
+
+                # Get peerings
+                peerings = vnet_data.get("virtualNetworkPeerings", [])
+
+                # Check peered VNets
+                for peering in peerings:
+                    remote_vnet_id = peering.get("remoteVirtualNetwork", {}).get("id", "")
+                    if not remote_vnet_id:
                         continue
+
+                    # Parse remote VNet resource ID
+                    remote_parts = remote_vnet_id.split("/")
+                    if len(remote_parts) < 9:
+                        continue
+
+                    remote_vnet_rg = remote_parts[4]
+                    remote_vnet_name = remote_parts[8]
+
+                    # Get remote VNet details with permission handling
+                    remote_cmd = [
+                        "network",
+                        "vnet",
+                        "show",
+                        "-g",
+                        remote_vnet_rg,
+                        "-n",
+                        remote_vnet_name,
+                        "-o",
+                        "json",
+                    ]
+                    remote_vnet_data = self.azure_cli.execute_with_permission_check(
+                        remote_cmd, f"retrieve peered VNet '{remote_vnet_name}' details"
+                    )
+
+                    if remote_vnet_data is None:
+                        # Permission denied - skip this peered VNet
+                        self.logger.debug(f"Skipping peered VNet '{remote_vnet_name}' due to insufficient permissions")
+                        continue
+
+                    if not isinstance(remote_vnet_data, dict):
+                        continue
+
+                    # Check if DNS IP is in this VNet's address space
+                    address_prefixes = remote_vnet_data.get("addressSpace", {}).get("addressPrefixes", [])
+                    for prefix in address_prefixes:
+                        try:
+                            network = ipaddress.ip_network(prefix, strict=False)
+                            if dns_ip in network:
+                                self.logger.debug(
+                                    f"DNS IP {dns_ip} found in VNet '{remote_vnet_data.get('name', '')}' "
+                                    f"(prefix: {prefix}, prefix_len: {network.prefixlen})"
+                                )
+                                # Use most specific match (highest prefix length)
+                                if network.prefixlen > smallest_prefix_len:
+                                    smallest_prefix_len = network.prefixlen
+                                    best_match = {
+                                        "id": remote_vnet_data.get("id", ""),
+                                        "name": remote_vnet_data.get("name", ""),
+                                        "resourceGroup": remote_vnet_data.get("resourceGroup", ""),
+                                    }
+                                    self.logger.debug(
+                                        f"Updated best match to VNet '{best_match['name']}' "
+                                        f"(more specific prefix: /{network.prefixlen})"
+                                    )
+                        except Exception as e:
+                            self.logger.debug(f"Error parsing network prefix {prefix}: {e}")
+                            continue
+
+            return best_match
 
         except Exception as e:
             self.logger.info(f"Could not find DNS server host VNet: {e}")
@@ -343,9 +534,14 @@ class MisconfigurationAnalyzer:
                     "-o",
                     "json",
                 ]
-                links = self.azure_cli.execute(cmd)
+                links = self.azure_cli.execute_with_permission_check(
+                    cmd, f"list VNet links for private DNS zone '{dns_zone_name}'"
+                )
 
-                if isinstance(links, list):
+                if links is None:
+                    # Permission denied - skip
+                    self.logger.debug(f"Skipping VNet links for '{dns_zone_name}' due to insufficient permissions")
+                elif isinstance(links, list):
                     cluster_vnet_ids = self._get_cluster_vnet_ids(cluster_info)
                     linked_vnet_ids = [link.get("virtualNetwork", {}).get("id", "") for link in links]
 
@@ -367,7 +563,12 @@ class MisconfigurationAnalyzer:
         """Find the resource group containing the private DNS zone"""
         try:
             cmd = ["network", "private-dns", "zone", "list", "-o", "json"]
-            zones = self.azure_cli.execute(cmd)
+            zones = self.azure_cli.execute_with_permission_check(cmd, "list private DNS zones for zone lookup")
+
+            if zones is None:
+                # Permission denied - return empty string
+                return ""
+
             if isinstance(zones, list):
                 for zone in zones:
                     if zone.get("name") == zone_name:
@@ -582,68 +783,24 @@ class MisconfigurationAnalyzer:
                 }
             )
 
-    def _analyze_nsg_issues(self, nsg_analysis: Dict[str, Any], findings: List[Dict[str, Any]]) -> None:
-        """Analyze NSG configuration issues"""
-        if not nsg_analysis:
-            return
-
-        blocking_rules = nsg_analysis.get("blockingRules", [])
-        for rule in blocking_rules:
-            effective_severity = rule.get("effectiveSeverity", "critical")
-            is_overridden = rule.get("isOverridden", False)
-            overriding_rules = rule.get("overriddenBy", [])
-
-            if is_overridden:
-                overriding_rule_names = [r.get("ruleName", "unknown") for r in overriding_rules[:2]]
-                message = f"NSG rule '{rule.get('ruleName')}' could block AKS traffic, but higher-priority allow rules override it: {', '.join(overriding_rule_names)}"
-                recommendation = f"Rule is currently ineffective due to higher-priority rules. Consider removing or adjusting priority {rule.get('priority')} for cleaner NSG configuration."
-            else:
-                message = f"NSG rule '{rule.get('ruleName')}' in '{rule.get('nsgName')}' may block AKS traffic"
-                recommendation = f"Review NSG rule priority {rule.get('priority')} - {rule.get('impact', 'Could affect cluster functionality')}"
-
-            findings.append(
-                {
-                    "severity": effective_severity,
-                    "code": "NSG_BLOCKING_AKS_TRAFFIC",
-                    "message": message,
-                    "recommendation": recommendation,
-                }
-            )
-
-        inter_node = nsg_analysis.get("interNodeCommunication", {})
-        if inter_node.get("status") == "potential_issues":
-            for issue in inter_node.get("issues", []):
-                nsg_name = issue.get("nsgName", "unknown")
-                location = issue.get("location", "unknown")
-                rule_count = len(issue.get("blockingRules", []))
-
-                findings.append(
-                    {
-                        "severity": "warning",
-                        "code": "NSG_INTER_NODE_BLOCKING",
-                        "message": f"NSG '{nsg_name}' on {location} has {rule_count} rule(s) that may block inter-node communication",
-                        "recommendation": "Ensure VirtualNetwork traffic is allowed between cluster nodes for proper functionality",
-                    }
-                )
-
-        subnet_nsgs = nsg_analysis.get("subnetNsgs", [])
-        nic_nsgs = nsg_analysis.get("nicNsgs", [])
-
-        if not subnet_nsgs and not nic_nsgs:
-            findings.append(
-                {
-                    "severity": "info",
-                    "code": "NSG_NO_RESTRICTIONS",
-                    "message": "No NSGs found on cluster node subnets or NICs",
-                    "recommendation": "Consider implementing NSGs for enhanced network security while ensuring AKS traffic is allowed",
-                }
-            )
-
     def _analyze_connectivity_test_results(
         self, api_probe_results: Optional[Dict[str, Any]], findings: List[Dict[str, Any]]
     ) -> None:
         """Analyze connectivity test results and add findings"""
         if not api_probe_results:
+            return
+
+        # Check if probe tests were skipped due to permission issues
+        if api_probe_results.get("skipped") and api_probe_results.get("reason") == "permission_denied":
+            permission_error = api_probe_results.get("permission_error", "Unknown")
+            findings.append(
+                {
+                    "severity": "warning",
+                    "code": "PERMISSION_INSUFFICIENT_PROBE_TEST",
+                    "message": "Unable to run connectivity probe tests due to insufficient permissions",
+                    "recommendation": f"Grant required permission to run connectivity tests from VMSS instances: {permission_error}",
+                }
+            )
             return
 
         if not api_probe_results.get("enabled"):
@@ -694,11 +851,37 @@ class MisconfigurationAnalyzer:
             )
 
         if error_tests:
-            findings.append(
-                {
-                    "severity": "warning",
-                    "code": "CONNECTIVITY_TEST_ERRORS",
-                    "message": f"{len(error_tests)} connectivity tests could not be executed",
-                    "recommendation": "Check VMSS instance status and run-command permissions. Ensure instances are running and accessible.",
-                }
-            )
+            # Check if errors are due to authorization/permission issues
+            auth_errors = [
+                t
+                for t in error_tests
+                if "AuthorizationFailed" in str(t.get("analysis", ""))
+                or "does not have authorization" in str(t.get("analysis", ""))
+                or "runCommand/action" in str(t.get("analysis", ""))
+            ]
+
+            if auth_errors:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "CONNECTIVITY_TEST_ERRORS",
+                        "message": f"{len(error_tests)} connectivity tests could not be executed due to insufficient permissions",
+                        "recommendation": (
+                            "Grant the following permission to run connectivity tests from VMSS instances:\n"
+                            "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/runCommand/action\n\n"
+                            "To grant this permission, assign the 'Virtual Machine Contributor' role or create a custom role:\n"
+                            "az role assignment create --assignee <service-principal-id> \\\n"
+                            "  --role 'Virtual Machine Contributor' \\\n"
+                            "  --scope /subscriptions/<subscription-id>/resourceGroups/<MC_resource_group>"
+                        ),
+                    }
+                )
+            else:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "CONNECTIVITY_TEST_ERRORS",
+                        "message": f"{len(error_tests)} connectivity tests could not be executed",
+                        "recommendation": "Check VMSS instance status and run-command permissions. Ensure instances are running and accessible.",
+                    }
+                )

@@ -140,10 +140,10 @@ class RouteTableAnalyzer:
                 subnet_name,
             ]
 
-            return self.azure_cli.execute(cmd)
+            return self.azure_cli.execute_with_permission_check(cmd, context=f"retrieve subnet '{subnet_name}' details")
 
         except Exception as e:
-            self.logger.info(f"    Error getting subnet details for {subnet_id}: {e}")
+            self.logger.debug(f"    Error getting subnet details for {subnet_id}: {e}")
             return None
 
     def _analyze_route_table(self, route_table_id: str, subnet_id: str) -> Optional[Dict[str, Any]]:
@@ -240,14 +240,14 @@ class RouteTableAnalyzer:
             self.logger.info(f"    Error analyzing route: {e}")
             return None
 
-    def _assess_route_impact(self, address_prefix: str, next_hop_type: str, next_hop_ip: str) -> Dict[str, Any]:
+    def _assess_route_impact(self, address_prefix: str, next_hop_type: str, _next_hop_ip: str) -> Dict[str, Any]:
         """
         Assess the potential impact of a route on AKS connectivity.
 
         Args:
             address_prefix: CIDR range covered by the route
             next_hop_type: Azure next hop type (VirtualAppliance, Internet, None, etc.)
-            next_hop_ip: IP address of the next hop (if applicable)
+            _next_hop_ip: IP address of the next hop (reserved for future use)
 
         Returns:
             Dictionary containing severity, description, and affected traffic types

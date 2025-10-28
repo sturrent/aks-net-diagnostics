@@ -357,7 +357,7 @@ Generated with `--json-report`, contains:
     "resource_group": "my-rg",
     "subscription": "xxx",
     "generated": "2025-10-03T14:30:00Z",
-    "script_version": "1.1.2"
+    "script_version": "1.2.0"
   },
   "cluster_info": { "..." },
   "findings": [
@@ -499,6 +499,6 @@ Built for Azure Kubernetes Service troubleshooting by the Azure community.
 
 ---
 
-**Version**: 1.1.2  
+**Version**: 1.2.0  
 **Last Updated**: October 2025  
 **Maintained by**: [@sturrent](https://github.com/sturrent)

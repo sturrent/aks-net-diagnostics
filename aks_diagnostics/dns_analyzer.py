@@ -145,10 +145,16 @@ class DNSAnalyzer:
             vnet_rg = vnet_parts[4]
             vnet_name = vnet_parts[8]
 
-            # Get VNet details including DNS servers
-            vnet_info = self.azure_cli.execute(
-                ["network", "vnet", "show", "--name", vnet_name, "--resource-group", vnet_rg]
+            # Get VNet details including DNS servers with permission handling
+            vnet_info = self.azure_cli.execute_with_permission_check(
+                ["network", "vnet", "show", "--name", vnet_name, "--resource-group", vnet_rg],
+                f"retrieve VNet '{vnet_name}' DNS configuration",
             )
+
+            if vnet_info is None:
+                # Permission denied
+                self.logger.warning(f"  Insufficient permissions to retrieve VNet DNS configuration for {vnet_name}")
+                return
 
             if not vnet_info:
                 self.logger.warning(f"  Unable to retrieve VNet information for {vnet_name}")
@@ -177,19 +183,20 @@ class DNSAnalyzer:
             non_azure_dns = [dns for dns in dns_servers if dns != azure_dns]
 
             if non_azure_dns and is_private_cluster:
-                # Private cluster with custom DNS - high risk
+                # Private cluster with custom DNS - potential issue but can work if configured properly
                 from .models import FindingCode
 
                 self.findings.append(
-                    Finding.create_critical(
+                    Finding.create_warning(
                         code=FindingCode.PRIVATE_DNS_MISCONFIGURED,
-                        message=f"Private cluster is using custom DNS servers ({', '.join(non_azure_dns)}) that cannot resolve Azure private DNS zones",
+                        message=f"Private cluster is using custom DNS servers ({', '.join(non_azure_dns)}) which may not resolve Azure private DNS zones",
                         recommendation=(
-                            "For private clusters, ensure custom DNS servers forward Azure private DNS zone queries to Azure DNS (168.63.129.16). "
+                            "For private clusters, custom DNS servers must be configured to resolve Azure private DNS zones. "
                             f"Current DNS servers: {', '.join(dns_servers)}. "
-                            "Either: (1) Configure DNS forwarding to 168.63.129.16 for '*.privatelink.*.azmk8s.io', "
-                            "(2) Use Azure DNS as primary DNS server, or "
-                            "(3) Configure conditional forwarding in your custom DNS solution."
+                            "Ensure one of the following: "
+                            "(1) DNS server VNet is linked to the private DNS zone, OR "
+                            "(2) Configure DNS forwarding to Azure DNS (168.63.129.16) for '*.privatelink.*.azmk8s.io', OR "
+                            "(3) Use Azure DNS (168.63.129.16) as primary DNS server."
                         ),
                         vnetName=vnet_name,
                         vnetResourceGroup=vnet_rg,
@@ -280,7 +287,7 @@ class DNSAnalyzer:
             dns_server_ips = set()
             in_server_section = False
 
-            for i, line in enumerate(lines):
+            for line in lines:
                 line_lower = line.lower()
                 # Check if this line indicates DNS server info
                 if "server:" in line_lower:

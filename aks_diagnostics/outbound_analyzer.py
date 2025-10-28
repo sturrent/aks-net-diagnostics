@@ -53,6 +53,7 @@ class OutboundConnectivityAnalyzer:
         # Results storage
         self.outbound_ips: List[str] = []
         self.outbound_analysis: Dict[str, Any] = {}
+        self.findings = []  # Store permission-related findings
 
     def analyze(self, show_details: bool = False) -> Dict[str, Any]:
         """
@@ -260,9 +261,28 @@ class OutboundConnectivityAnalyzer:
                 self.logger.info("    No node resource group found")
             return
 
-        # List load balancers in the managed resource group
+        # List load balancers in the managed resource group with permission handling
         lb_cmd = ["network", "lb", "list", "-g", mc_rg, "-o", "json"]
-        load_balancers = self.azure_cli.execute(lb_cmd)
+        load_balancers = self.azure_cli.execute_with_permission_check(lb_cmd, f"list load balancers in '{mc_rg}'")
+
+        if load_balancers is None:
+            # Permission denied
+            from .models import Finding, FindingCode
+
+            finding = Finding.create_warning(
+                code=FindingCode.PERMISSION_INSUFFICIENT_LB,
+                message=f"Insufficient permissions to retrieve Load Balancer configuration in '{mc_rg}'",
+                recommendation=(
+                    f"Grant the following permission to analyze Load Balancer outbound configuration:\n"
+                    f"  Microsoft.Network/loadBalancers/read\n\n"
+                    f"Example Azure CLI command:\n"
+                    f"  az role assignment create --assignee <user-principal-id> \\\n"
+                    f"    --role 'Reader' \\\n"
+                    f"    --scope '/subscriptions/<sub-id>/resourceGroups/{mc_rg}'"
+                ),
+            )
+            self.findings.append(finding)
+            return
 
         if not isinstance(load_balancers, list):
             if show_details:
@@ -320,14 +340,28 @@ class OutboundConnectivityAnalyzer:
                         "-o",
                         "json",
                     ]
-                    frontend_config = self.azure_cli.execute(frontend_cmd)
+                    frontend_config = self.azure_cli.execute_with_permission_check(
+                        frontend_cmd, f"retrieve frontend IP config '{config_name}'"
+                    )
+
+                    if frontend_config is None:
+                        # Permission denied - skip this config
+                        self.logger.debug(
+                            f"Skipping frontend IP config '{config_name}' due to insufficient permissions"
+                        )
+                        continue
 
                     if isinstance(frontend_config, dict):
                         public_ip = frontend_config.get("publicIPAddress", {})
                         if public_ip and public_ip.get("id"):
                             # Get public IP details
                             ip_cmd = ["network", "public-ip", "show", "--ids", public_ip["id"], "-o", "json"]
-                            ip_info = self.azure_cli.execute(ip_cmd)
+                            ip_info = self.azure_cli.execute_with_permission_check(ip_cmd, "retrieve public IP details")
+
+                            if ip_info is None:
+                                # Permission denied - skip
+                                self.logger.debug("Skipping public IP details due to insufficient permissions")
+                                continue
 
                             if ip_info and ip_info.get("ipAddress"):
                                 ip_address = ip_info["ipAddress"]
@@ -370,9 +404,14 @@ class OutboundConnectivityAnalyzer:
                 self.logger.info("    No node resource group found")
             return
 
-        # List NAT Gateways in the managed resource group
+        # List NAT Gateways in the managed resource group with permission handling
         natgw_cmd = ["network", "nat", "gateway", "list", "-g", mc_rg, "-o", "json"]
-        nat_gateways = self.azure_cli.execute(natgw_cmd)
+        nat_gateways = self.azure_cli.execute_with_permission_check(natgw_cmd, f"list NAT Gateways in '{mc_rg}'")
+
+        if nat_gateways is None:
+            # Permission denied - log and return
+            self.logger.debug("Skipping NAT Gateway analysis due to insufficient permissions")
+            return
 
         if not isinstance(nat_gateways, list):
             if show_details:
@@ -451,7 +490,7 @@ class OutboundConnectivityAnalyzer:
             resource_group = parts[4]
             public_ip_name = parts[8]
 
-            # Get public IP details
+            # Get public IP details with permission handling
             cmd = [
                 "network",
                 "public-ip",
@@ -466,7 +505,7 @@ class OutboundConnectivityAnalyzer:
                 "json",
             ]
 
-            return self.azure_cli.execute(cmd)
+            return self.azure_cli.execute_with_permission_check(cmd, f"retrieve public IP '{public_ip_name}'")
 
         except Exception as e:
             self.logger.debug(f"Error getting public IP details for {public_ip_id}: {e}")
@@ -492,7 +531,7 @@ class OutboundConnectivityAnalyzer:
             resource_group = parts[4]
             prefix_name = parts[8]
 
-            # Get public IP prefix details
+            # Get public IP prefix details with permission handling
             cmd = [
                 "network",
                 "public-ip",
@@ -508,7 +547,7 @@ class OutboundConnectivityAnalyzer:
                 "json",
             ]
 
-            return self.azure_cli.execute(cmd)
+            return self.azure_cli.execute_with_permission_check(cmd, f"retrieve public IP prefix '{prefix_name}'")
 
         except Exception as e:
             self.logger.debug(f"Error getting public IP prefix details for {prefix_id}: {e}")

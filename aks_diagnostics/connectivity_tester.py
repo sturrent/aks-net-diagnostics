@@ -101,6 +101,11 @@ class ConnectivityTester:
 
         # Get VMSS instances for testing (limited to first available for performance)
         vmss_instances = self._list_ready_vmss_instances()
+
+        # Check if permission error was set during VMSS listing
+        if self.probe_results.get("skipped") and self.probe_results.get("reason") == "permission_denied":
+            return self.probe_results
+
         if not vmss_instances:
             self.logger.info("No VMSS instances found for connectivity testing")
             return self.probe_results
@@ -133,12 +138,33 @@ class ConnectivityTester:
             return instances
 
         try:
-            vmss_list = self.azure_cli_executor.execute(["vmss", "list", "-g", mc_rg, "-o", "json"])
+            vmss_list = self.azure_cli_executor.execute_with_permission_check(
+                ["vmss", "list", "-g", mc_rg, "-o", "json"],
+                context=f"list VMSS instances in '{mc_rg}' for connectivity testing",
+            )
         except RuntimeError as exc:
             self.logger.info(f"Error listing VMSS in {mc_rg}: {exc}")
             return instances
 
+        # Check for permission error (None) vs empty list (no VMSS)
+        if vmss_list is None:
+            self.logger.warning(
+                "Unable to list VMSS instances for connectivity testing. "
+                "Skipping active probes. Required permission: Microsoft.Compute/virtualMachineScaleSets/read"
+            )
+            # Set probe results to indicate permission issue
+            self.probe_results = {
+                "enabled": False,
+                "skipped": True,
+                "reason": "permission_denied",
+                "permission_error": "Microsoft.Compute/virtualMachineScaleSets/read",
+                "tests": [],
+                "summary": {"total_tests": 0, "passed": 0, "failed": 0, "errors": 0},
+            }
+            return instances
+
         if not isinstance(vmss_list, list):
+            self.logger.warning(f"Unexpected response type from VMSS list: {type(vmss_list)}")
             return instances
 
         for vmss in vmss_list:
@@ -147,14 +173,15 @@ class ConnectivityTester:
                 continue
 
             try:
-                vmss_nodes = self.azure_cli_executor.execute(
-                    ["vmss", "list-instances", "-g", mc_rg, "-n", vmss_name, "-o", "json"]
+                vmss_nodes = self.azure_cli_executor.execute_with_permission_check(
+                    ["vmss", "list-instances", "-g", mc_rg, "-n", vmss_name, "-o", "json"],
+                    context=f"list instances for VMSS '{vmss_name}'",
                 )
             except RuntimeError as exc:
                 self.logger.info(f"Error listing VMSS instances for {vmss_name}: {exc}")
                 continue
 
-            if not isinstance(vmss_nodes, list):
+            if not vmss_nodes or not isinstance(vmss_nodes, list):
                 continue
 
             # Find first running instance

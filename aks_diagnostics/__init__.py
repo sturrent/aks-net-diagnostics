@@ -1,9 +1,6 @@
-"""
-AKS Network Diagnostics Package
-Modular package for analyzing AKS cluster network configurations
-"""
+"""AKS Network Diagnostics - Comprehensive AKS network configuration analysis tool"""
 
-__version__ = "1.1.2"
+__version__ = "1.2.0"
 __author__ = "Azure Networking Diagnostics Generator"
 
 # Import only the modules that exist

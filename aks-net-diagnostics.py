@@ -3,7 +3,7 @@
 AKS Network Diagnostics Script
 Comprehensive read-only analysis of AKS cluster network configuration
 Author: Azure Networking Diagnostics Generator
-Version: 1.1.2
+Version: 1.2.0
 """
 
 import argparse
@@ -190,16 +190,16 @@ EXAMPLES:
             subprocess.run(
                 ["az", "--version"], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS
             )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            raise FileNotFoundError("Azure CLI is not installed or not in PATH")
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            raise FileNotFoundError("Azure CLI is not installed or not in PATH") from exc
 
         # Check if logged in
         try:
             subprocess.run(
                 ["az", "account", "show"], capture_output=True, check=True, timeout=AZURE_CLI_TIMEOUT, shell=IS_WINDOWS
             )
-        except subprocess.CalledProcessError:
-            raise PermissionError("Not logged in to Azure. Run 'az login' first.")
+        except subprocess.CalledProcessError as exc:
+            raise PermissionError("Not logged in to Azure. Run 'az login' first.") from exc
 
         # Set subscription if provided
         if self.subscription:
@@ -212,8 +212,8 @@ EXAMPLES:
                     shell=IS_WINDOWS,
                 )
                 self.logger.info(f"Using Azure subscription: {self.subscription}")
-            except subprocess.CalledProcessError:
-                raise ValueError(f"Failed to set subscription: {self.subscription}")
+            except subprocess.CalledProcessError as exc:
+                raise ValueError(f"Failed to set subscription: {self.subscription}") from exc
         else:
             # Get current subscription
             current_sub = self.azure_cli_executor.execute(
@@ -233,20 +233,20 @@ EXAMPLES:
 
     def analyze_vnet_configuration(self):
         """Analyze VNet configuration using ClusterDataCollector"""
-        collector = ClusterDataCollector(self.azure_cli_executor, self.logger)
-        self.vnets_analysis = collector.collect_vnet_info(self.agent_pools)
+        self.cluster_data_collector = ClusterDataCollector(self.azure_cli_executor, self.logger)
+        self.vnets_analysis = self.cluster_data_collector.collect_vnet_info(self.agent_pools)
 
     def analyze_outbound_connectivity(self):
         """Analyze outbound connectivity configuration using OutboundConnectivityAnalyzer"""
-        analyzer = OutboundConnectivityAnalyzer(
+        self.outbound_analyzer = OutboundConnectivityAnalyzer(
             cluster_info=self.cluster_info,
             agent_pools=self.agent_pools,
             azure_cli=self.azure_cli_executor,
             logger=self.logger,
         )
 
-        self.outbound_analysis = analyzer.analyze(show_details=self.show_details)
-        self.outbound_ips = analyzer.get_outbound_ips()
+        self.outbound_analysis = self.outbound_analyzer.analyze(show_details=self.show_details)
+        self.outbound_ips = self.outbound_analyzer.get_outbound_ips()
 
     def _analyze_node_subnet_udrs(self):
         """Analyze User Defined Routes on node subnets using RouteTableAnalyzer"""
@@ -260,8 +260,6 @@ EXAMPLES:
 
     def analyze_nsg_configuration(self):
         """Analyze Network Security Group configuration for AKS nodes using modular NSGAnalyzer"""
-        self.logger.info("Analyzing NSG configuration...")
-
         try:
             # Create NSG analyzer instance with the new modular component
             nsg_analyzer = NSGAnalyzer(
@@ -346,8 +344,8 @@ EXAMPLES:
             import urllib.error
             import urllib.request
 
-            response = urllib.request.urlopen("https://api.ipify.org", timeout=5)
-            return response.read().decode("utf-8").strip()
+            with urllib.request.urlopen("https://api.ipify.org", timeout=5) as response:
+                return response.read().decode("utf-8").strip()
         except Exception:
             return None
 
@@ -360,10 +358,10 @@ EXAMPLES:
 
     def analyze_misconfigurations(self):
         """Analyze potential misconfigurations and failures using MisconfigurationAnalyzer"""
-        analyzer = MisconfigurationAnalyzer(self.azure_cli_executor, self.logger)
+        self.misconfiguration_analyzer = MisconfigurationAnalyzer(self.azure_cli_executor, self.logger)
 
         # Run analysis and get findings
-        findings, cluster_stopped = analyzer.analyze(
+        findings, cluster_stopped = self.misconfiguration_analyzer.analyze(
             cluster_info=self.cluster_info,
             outbound_analysis=self.outbound_analysis,
             outbound_ips=self.outbound_ips,
@@ -372,6 +370,7 @@ EXAMPLES:
             nsg_analysis=self.nsg_analysis,
             api_probe_results=self.api_probe_results,
             vmss_analysis=self.vmss_analysis,
+            outbound_analyzer=self.outbound_analyzer,
         )
 
         # Store results
@@ -409,6 +408,27 @@ EXAMPLES:
         if self.json_report:
             report_gen.save_json_report(self.json_report, file_permissions=DEFAULT_FILE_PERMISSIONS)
 
+    def collect_permission_findings(self):
+        """Collect permission-related findings from all analyzers"""
+        # Collect from cluster data collector
+        if hasattr(self, "cluster_data_collector") and hasattr(self.cluster_data_collector, "findings"):
+            for finding in self.cluster_data_collector.findings:
+                self.findings.append(finding.to_dict() if hasattr(finding, "to_dict") else finding)
+
+        # Collect from outbound analyzer
+        if hasattr(self, "outbound_analyzer") and hasattr(self.outbound_analyzer, "findings"):
+            for finding in self.outbound_analyzer.findings:
+                self.findings.append(finding.to_dict() if hasattr(finding, "to_dict") else finding)
+
+        # Collect from misconfiguration analyzer
+        if hasattr(self, "misconfiguration_analyzer") and hasattr(self.misconfiguration_analyzer, "findings"):
+            for finding in self.misconfiguration_analyzer.findings:
+                self.findings.append(finding.to_dict() if hasattr(finding, "to_dict") else finding)
+
+        # NSG and DNS analyzer findings are already collected in their respective methods
+        # Note: Permission findings are created by analyzers with specific context,
+        # so we don't need to duplicate them from azure_cli.permission_errors
+
     def run(self):
         """Main execution method"""
         self.parse_arguments()
@@ -426,6 +446,7 @@ EXAMPLES:
         self.analyze_api_server_access()
         self.check_api_connectivity()
         self.analyze_misconfigurations()
+        self.collect_permission_findings()  # Collect all permission findings before reporting
         self.generate_report()
 
 

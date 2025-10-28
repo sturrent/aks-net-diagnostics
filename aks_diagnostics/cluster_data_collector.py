@@ -23,6 +23,7 @@ class ClusterDataCollector:
         """
         self.azure_cli = azure_cli_executor
         self.logger = logger or logging.getLogger(__name__)
+        self.findings = []  # Store permission-related findings
 
     def collect_cluster_info(self, cluster_name: str, resource_group: str) -> Dict[str, Any]:
         """
@@ -111,9 +112,30 @@ class ClusterDataCollector:
             vnet_rg = subnet_id.split("/")[4]  # Resource group is at index 4 in the resource ID
 
             if vnet_name not in vnets_map:
-                # Get VNet information
+                # Get VNet information with permission handling
                 vnet_cmd = ["network", "vnet", "show", "-n", vnet_name, "-g", vnet_rg, "-o", "json"]
-                vnet_info = self.azure_cli.execute(vnet_cmd)
+                vnet_info = self.azure_cli.execute_with_permission_check(
+                    vnet_cmd, f"retrieve VNet '{vnet_name}' details"
+                )
+
+                if vnet_info is None:
+                    # Permission denied - add finding and skip this VNet
+                    from .models import Finding, FindingCode
+
+                    finding = Finding.create_warning(
+                        code=FindingCode.PERMISSION_INSUFFICIENT_VNET,
+                        message=f"Insufficient permissions to retrieve VNet '{vnet_name}' details",
+                        recommendation=(
+                            f"Grant the following permission to analyze VNet configuration:\n"
+                            f"  Microsoft.Network/virtualNetworks/read\n\n"
+                            f"Example Azure CLI command:\n"
+                            f"  az role assignment create --assignee <user-principal-id> \\\n"
+                            f"    --role 'Network Contributor' \\\n"
+                            f"    --scope '/subscriptions/<sub-id>/resourceGroups/{vnet_rg}'"
+                        ),
+                    )
+                    self.findings.append(finding)
+                    continue
 
                 if vnet_info:
                     vnets_map[vnet_name] = {
@@ -125,7 +147,7 @@ class ClusterDataCollector:
                         "peerings": [],
                     }
 
-                    # Get VNet peerings
+                    # Get VNet peerings with permission handling
                     peering_cmd = [
                         "network",
                         "vnet",
@@ -138,9 +160,14 @@ class ClusterDataCollector:
                         "-o",
                         "json",
                     ]
-                    peerings = self.azure_cli.execute(peering_cmd)
+                    peerings = self.azure_cli.execute_with_permission_check(
+                        peering_cmd, f"retrieve VNet peerings for '{vnet_name}'"
+                    )
 
-                    if isinstance(peerings, list):
+                    if peerings is None:
+                        # Permission denied for peerings - log and continue
+                        self.logger.debug(f"Skipping VNet peerings for '{vnet_name}' due to insufficient permissions")
+                    elif isinstance(peerings, list):
                         for peering in peerings:
                             vnets_map[vnet_name]["peerings"].append(
                                 {
@@ -173,9 +200,28 @@ class ClusterDataCollector:
             self.logger.warning("No managed resource group found in cluster info")
             return []
 
-        # List VMSS in the managed resource group
+        # List VMSS in the managed resource group with permission handling
         vmss_cmd = ["vmss", "list", "-g", mc_rg, "-o", "json"]
-        vmss_list = self.azure_cli.execute(vmss_cmd)
+        vmss_list = self.azure_cli.execute_with_permission_check(vmss_cmd, f"retrieve VMSS list in '{mc_rg}'")
+
+        if vmss_list is None:
+            # Permission denied - add finding
+            from .models import Finding, FindingCode
+
+            finding = Finding.create_warning(
+                code=FindingCode.PERMISSION_INSUFFICIENT_VMSS,
+                message=f"Insufficient permissions to retrieve VMSS configuration in '{mc_rg}'",
+                recommendation=(
+                    f"Grant the following permission to analyze VMSS network configuration:\n"
+                    f"  Microsoft.Compute/virtualMachineScaleSets/read\n\n"
+                    f"Example Azure CLI command:\n"
+                    f"  az role assignment create --assignee <user-principal-id> \\\n"
+                    f"    --role 'Reader' \\\n"
+                    f"    --scope '/subscriptions/<sub-id>/resourceGroups/{mc_rg}'"
+                ),
+            )
+            self.findings.append(finding)
+            return []
 
         if not isinstance(vmss_list, list):
             return []
@@ -190,7 +236,9 @@ class ClusterDataCollector:
 
             # Get VMSS network profile
             vmss_detail_cmd = ["vmss", "show", "-n", vmss_name, "-g", mc_rg, "-o", "json"]
-            vmss_detail = self.azure_cli.execute(vmss_detail_cmd)
+            vmss_detail = self.azure_cli.execute_with_permission_check(
+                vmss_detail_cmd, context=f"retrieve VMSS '{vmss_name}' details"
+            )
 
             if vmss_detail:
                 network_profile = vmss_detail.get("virtualMachineProfile", {}).get("networkProfile", {})
