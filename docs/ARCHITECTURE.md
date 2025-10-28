@@ -119,11 +119,18 @@ sequenceDiagram
 **Used By**: Main orchestrator
 
 #### 2. AzureCLIExecutor
-**Purpose**: Execute Azure CLI commands with error handling  
+**Purpose**: Execute Azure CLI commands with error handling and permission awareness  
 **Key Features**:
 - Command validation and sanitization
 - Configurable timeouts
 - Comprehensive error handling
+- **Permission-aware execution**: Detects and handles Azure RBAC authorization errors
+- **Graceful degradation**: Continues analysis with partial data when permissions are insufficient
+
+**Key Methods**:
+- `execute()` - Standard command execution with error handling
+- `execute_with_permission_check()` - Permission-aware execution that creates findings instead of crashing
+- `_is_authorization_error()` - Detects `AuthorizationFailed` errors in Azure CLI output
 
 **Used By**: All analyzers, ClusterDataCollector
 
@@ -193,10 +200,17 @@ sequenceDiagram
 - Dependency-aware test execution
 - Configurable timeouts
 - Detailed error reporting
+- **Permission-aware VMSS operations**: Uses `execute_with_permission_check()` for VMSS list operations
 
 **Key Finding Codes**:
 - `CONNECTIVITY_DNS_FAILURE` - DNS resolution failed
 - `CONNECTIVITY_HTTP_FAILURE` - HTTPS connectivity failed
+- `PERMISSION_INSUFFICIENT_PROBE_TEST` - Missing run-command permissions
+
+**Known Limitations**:
+- Azure CLI v2.78.0 has a bug with `vmss run-command invoke` (returns "This is a sample script")
+- Workaround: Use Azure CLI v2.77 or wait for v2.78.1/v2.79.0
+- Tracked in [Azure CLI issue #32286](https://github.com/Azure/azure-cli/issues/32286)
 
 #### 8. OutboundConnectivityAnalyzer
 **Purpose**: Outbound configuration analysis  
@@ -269,10 +283,17 @@ sequenceDiagram
 #### 14. Models
 **Purpose**: Data models and constants  
 **Contains**:
-- `Finding` - Finding data structure
-- `FindingCode` - Finding type enumeration
-- `Severity` - Severity levels
+- `Finding` - Finding data structure with severity, code, message, recommendation
+- `FindingCode` - Finding type enumeration (40+ finding codes)
+- `Severity` - Severity levels (CRITICAL, ERROR, WARNING, INFO)
 - `VMSSInstance` - VMSS instance model
+- `DiagnosticResult` - Complete diagnostic results container
+
+**Permission-Related Finding Codes**:
+- `PERMISSION_INSUFFICIENT_VNET` - Missing VNet read permissions
+- `PERMISSION_INSUFFICIENT_VMSS` - Missing VMSS read permissions
+- `PERMISSION_INSUFFICIENT_LB` - Missing Load Balancer read permissions
+- `PERMISSION_INSUFFICIENT_PROBE_TEST` - Missing VMSS run-command permissions
 
 #### 15. Exceptions
 **Purpose**: Custom exception types  
@@ -297,6 +318,39 @@ Main Script → ClusterDataCollector → AzureCLIExecutor → Azure CLI
                                               ↓
                                      Cluster Info, Pools, VNets, VMSS
 ```
+
+#### Data Collection Phase Detail
+
+The following diagram shows the complete data collection workflow with permission-aware error handling:
+
+```mermaid
+graph TB
+    START[Start Collection] --> CLUSTER[Collect Cluster Info]
+    CLUSTER --> POOLS[Get Agent Pools]
+    POOLS --> VNET[Collect VNet Info]
+    VNET --> PEERINGS[Get VNet Peerings]
+    PEERINGS --> VMSS[Collect VMSS Info]
+    VMSS --> NICS[Get VMSS Network Interfaces]
+    NICS --> END[Collection Complete]
+    
+    CLUSTER -.->|AuthorizationError| PERM1[Create Permission Finding]
+    VNET -.->|AuthorizationError| PERM2[Create Permission Finding]
+    VMSS -.->|AuthorizationError| PERM3[Create Permission Finding]
+    
+    PERM1 --> END
+    PERM2 --> END
+    PERM3 --> END
+    
+    style PERM1 fill:#ffe1e1
+    style PERM2 fill:#ffe1e1
+    style PERM3 fill:#ffe1e1
+```
+
+**Key Behaviors**:
+- **Happy Path** (solid lines): Normal data collection when permissions are sufficient
+- **Error Path** (dotted lines): Permission errors create findings but don't stop execution
+- **Graceful Continuation**: Analysis proceeds with partial data even when some operations fail
+- **Red Nodes**: Permission findings provide specific remediation steps
 
 ### 3. Analysis Phase
 
@@ -361,6 +415,27 @@ Errors in one analyzer don't break others:
 - Try/catch in each analyzer
 - Graceful degradation
 - Partial results still useful
+
+### 6. Permission-Aware Design
+Tool handles insufficient Azure RBAC permissions gracefully:
+- **Detection**: `AzureCLIExecutor` detects `AuthorizationFailed` errors in Azure CLI output
+- **Continuation**: Analysis continues with partial data instead of crashing
+- **Reporting**: Creates specific permission findings with actionable recommendations
+- **User Guidance**: Provides exact `az role assignment` commands to grant required permissions
+
+**Permission Patterns**:
+```python
+# Permission-aware execution
+result = self.azure_cli.execute_with_permission_check(
+    ['network', 'vnet', 'show', '-g', rg, '-n', vnet_name],
+    operation_description="retrieve VNet details",
+    required_permission="Microsoft.Network/virtualNetworks/read"
+)
+
+if result is None:
+    # Permission error - finding already created, continue with partial analysis
+    return None
+```
 
 ## Extension Points
 
@@ -525,6 +600,30 @@ def test_component_when_condition_then_result(self):
 - JSON reports don't include secrets
 - File permissions: 0600 (owner read/write only)
 
+### Permission Requirements
+Tool requires **read-only** Azure RBAC permissions:
+
+**Minimum Required Permissions**:
+- `Microsoft.ContainerService/managedClusters/read` - Read cluster configuration
+- `Microsoft.Network/virtualNetworks/read` - Read VNet configuration
+- `Microsoft.Network/networkSecurityGroups/read` - Read NSG rules
+- `Microsoft.Network/routeTables/read` - Read route tables
+- `Microsoft.Compute/virtualMachineScaleSets/read` - Read VMSS configuration
+
+**For Probe Tests (--probe-test flag)**:
+- `Microsoft.Compute/virtualMachineScaleSets/virtualMachines/runCommand/action` - Execute connectivity tests
+
+**Recommended Roles**:
+- **Reader** role on cluster resource group (minimum for basic analysis)
+- **Reader** role on VNet resource group (for network analysis)
+- **Virtual Machine Contributor** role on MC resource group (for probe tests)
+
+**Graceful Degradation**:
+- Tool continues analysis even with limited permissions
+- Creates specific permission findings with remediation guidance
+- Reports show "Analysis Incomplete" indicator when data is missing
+- Each missing permission includes exact `az role assignment` command to fix
+
 ## Distribution & Build Process
 
 ### Single-File Distribution (.pyz)
@@ -649,4 +748,4 @@ The `tools/build_zipapp.py` script:
 ---
 
 **Last Updated**: October 2025  
-**Version**: 1.1.2
+**Version**: 1.2.0

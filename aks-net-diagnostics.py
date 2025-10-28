@@ -3,7 +3,7 @@
 AKS Network Diagnostics Script
 Comprehensive read-only analysis of AKS cluster network configuration
 Author: Azure Networking Diagnostics Generator
-Version: 1.1.2
+Version: 1.2.0
 """
 
 import argparse
