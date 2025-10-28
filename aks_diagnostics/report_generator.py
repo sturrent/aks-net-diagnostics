@@ -231,8 +231,37 @@ class ReportGenerator:
             # We have permission issues and can't show outbound configuration
             print()
             print("**Outbound Configuration:**")
-            print(f"- Unable to retrieve {outbound_type} configuration due to insufficient permissions")
+            print("- Unable to retrieve {outbound_type} configuration due to insufficient permissions")
             print("- See permission findings below for details")
+
+        # Add connectivity test summary if probe tests were enabled
+        if self.api_probe_results and self.api_probe_results.get("enabled"):
+            print()
+            print("**Connectivity Tests:**")
+            summary = self.api_probe_results.get("summary", {})
+            total = summary.get("total_tests", 0)
+            passed = summary.get("passed", 0)
+            failed = summary.get("failed", 0)
+            errors = summary.get("errors", 0)
+
+            print(f"- **Total Tests:** {total}")
+            if passed > 0:
+                print(f"- **[OK] Passed:** {passed}")
+            if failed > 0:
+                print(f"- **[FAILED] Tests Failed:** {failed}")
+            if errors > 0:
+                print(f"- **[ERROR] Could Not Execute:** {errors}")
+        elif self.api_probe_results and self.api_probe_results.get("skipped"):
+            # Probe tests were requested but skipped due to permission or cluster state
+            print()
+            print("**Connectivity Tests:**")
+            reason = self.api_probe_results.get("reason", "Unknown")
+            if reason == "permission_denied":
+                print("- **Status:** Skipped due to insufficient permissions")
+            elif reason == "Cluster is stopped":
+                print("- **Status:** Skipped (cluster is stopped)")
+            else:
+                print(f"- **Status:** Skipped ({reason})")
 
         print()
         print("**Findings Summary:**")
@@ -464,7 +493,12 @@ class ReportGenerator:
 
             if self.api_probe_results.get("skipped"):
                 reason = self.api_probe_results.get("reason", "Unknown reason")
-                print(f"- **Status:** Skipped ({reason})")
+                if reason == "permission_denied":
+                    print("- **Status:** Skipped due to insufficient permissions")
+                elif reason == "Cluster is stopped":
+                    print("- **Status:** Skipped (cluster is stopped)")
+                else:
+                    print(f"- **Status:** Skipped ({reason})")
                 print()
             else:
                 summary = self.api_probe_results.get("summary", {})
@@ -473,13 +507,13 @@ class ReportGenerator:
                 failed = summary.get("failed", 0)
                 errors = summary.get("errors", 0)
 
-                print(f"- **Tests Executed:** {total}")
+                print(f"- **Total Tests:** {total}")
                 if passed > 0:
                     print(f"- **[OK] Passed:** {passed}")
                 if failed > 0:
-                    print(f"- **X Failed:** {failed}")
+                    print(f"- **[FAILED] Tests Failed:** {failed}")
                 if errors > 0:
-                    print(f"- **[WARNING] Errors:** {errors}")
+                    print(f"- **[ERROR] Could Not Execute:** {errors}")
 
                 # Show detailed results
                 tests = self.api_probe_results.get("tests", [])
