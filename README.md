@@ -1,4 +1,7 @@
-﻿# AKS Network Diagnostics Tool
+# This repo has been archived. Please review the new setup with Azure CLI extensions [here](https://github.com/sturrent/azure-cli-extensions/releases).
+ 
+ 
+ # AKS Network Diagnostics Tool
 
 A comprehensive Python tool for analyzing Azure Kubernetes Service (AKS) network configurations and diagnosing connectivity issues. Features a modular architecture with specialized analyzers for deep network troubleshooting.
 
